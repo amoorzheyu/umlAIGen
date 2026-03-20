@@ -1,0 +1,26 @@
+TEMP/
+.cursor/
+
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Generated UML output files
+output/
+
+# Misc
+.DS_Store
+*.pem
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
