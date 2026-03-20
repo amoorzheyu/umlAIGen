@@ -5,14 +5,15 @@ import { motion } from "framer-motion";
 import {
   Lightning,
   Spinner,
+  Plus,
   ArrowRight,
   Graph,
   TreeStructure,
   ArrowsLeftRight,
   CirclesThree,
   Stack,
+  X,
   FileText,
-  Image as ImageIcon,
 } from "@phosphor-icons/react";
 
 export type UmlHint =
@@ -93,8 +94,7 @@ export default function InputPanel({
   onClearReferenceContext,
 }: InputPanelProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const [referenceError, setReferenceError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -136,72 +136,85 @@ export default function InputPanel({
   const makeId = (file: File) =>
     `${file.name}_${file.size}_${file.lastModified}`;
 
-  const handleAddImages = async (files: FileList | null) => {
-    setReferenceError(null);
-    if (!files || files.length === 0) return;
-
-    const picked = Array.from(files);
-    const validImages = picked.filter((f) => f.type.startsWith("image/"));
-
-    if (validImages.length !== picked.length) {
-      setReferenceError("图片只接受 image/* 类型。");
-    }
-
-    const next: ReferenceImagePreview[] = [...referenceImages];
-    let nextTotal = currentTotalBytes;
-
-    for (const f of validImages) {
-      if (f.size > IMAGE_MAX_BYTES) {
-        setReferenceError(`图片 ${f.name} 超过 5MB 限制。`);
-        continue;
-      }
-      if (nextTotal + f.size > TOTAL_MAX_BYTES) {
-        setReferenceError("参考资料总大小超过 10MB 限制。");
-        continue;
-      }
-      nextTotal += f.size;
-      const dataUrl = await fileToDataUrl(f);
-      next.push({
-        id: makeId(f),
-        filename: f.name,
-        size: f.size,
-        mimeType: f.type || "image/*",
-        dataUrl,
-        file: f,
-      });
-    }
-
-    onReferenceChange(next, referenceFiles);
+  const guessImageMimeType = (fileName: string, type: string) => {
+    if (type?.startsWith("image/")) return type;
+    const lower = fileName.toLowerCase();
+    if (lower.endsWith(".png")) return "image/png";
+    if (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
+      return "image/jpeg";
+    if (lower.endsWith(".gif")) return "image/gif";
+    if (lower.endsWith(".webp")) return "image/webp";
+    if (lower.endsWith(".bmp")) return "image/bmp";
+    if (lower.endsWith(".svg")) return "image/svg+xml";
+    if (lower.endsWith(".tif") || lower.endsWith(".tiff")) return "image/tiff";
+    return "image/*";
   };
 
-  const handleAddFiles = async (files: FileList | null) => {
+  const isProbablyImage = (file: File) => {
+    if (file.type?.startsWith("image/")) return true;
+    return /\.(png|jpe?g|gif|webp|bmp|svg|tiff?)$/i.test(
+      file.name.toLowerCase()
+    );
+  };
+
+  const handleAddUploads = async (files: FileList | null) => {
     setReferenceError(null);
     if (!files || files.length === 0) return;
 
     const picked = Array.from(files);
-    const next: ReferenceFilePreview[] = [...referenceFiles];
+    const nextImages: ReferenceImagePreview[] = [...referenceImages];
+    const nextFiles: ReferenceFilePreview[] = [...referenceFiles];
     let nextTotal = currentTotalBytes;
+    const MAX_ITEMS = 20;
+    let nextCount =
+      referenceImages.filter((i) => Boolean(i.file)).length +
+      referenceFiles.filter((f) => Boolean(f.file)).length;
 
     for (const f of picked) {
-      if (f.size > FILE_MAX_BYTES) {
-        setReferenceError(`文件 ${f.name} 超过 5MB 限制。`);
-        continue;
-      }
       if (nextTotal + f.size > TOTAL_MAX_BYTES) {
         setReferenceError("参考资料总大小超过 10MB 限制。");
         continue;
       }
+
+      const isImage = isProbablyImage(f);
+      const perItemMaxBytes = isImage ? IMAGE_MAX_BYTES : FILE_MAX_BYTES;
+      if (f.size > perItemMaxBytes) {
+        setReferenceError(
+          `${isImage ? "图片" : "文件"} ${f.name} 超过 5MB 限制。`
+        );
+        continue;
+      }
+
+      if (nextCount + 1 > MAX_ITEMS) {
+        setReferenceError("参考资料数量过多，请减少文件数。");
+        continue;
+      }
+
       nextTotal += f.size;
-      next.push({
-        id: makeId(f),
-        filename: f.name,
-        size: f.size,
-        mimeType: f.type || "application/octet-stream",
-        file: f,
-      });
+      nextCount += 1;
+
+      if (isImage) {
+        const dataUrl = await fileToDataUrl(f);
+        nextImages.push({
+          id: makeId(f),
+          filename: f.name,
+          size: f.size,
+          mimeType: guessImageMimeType(f.name, f.type),
+          dataUrl,
+          file: f,
+        });
+      } else {
+        nextFiles.push({
+          id: makeId(f),
+          filename: f.name,
+          size: f.size,
+          mimeType: f.type || "application/octet-stream",
+          file: f,
+        });
+      }
     }
 
-    onReferenceChange(referenceImages, next);
+    onReferenceChange(nextImages, nextFiles);
   };
 
   const handleRemoveImage = (id: string) => {
@@ -340,113 +353,98 @@ export default function InputPanel({
           </div>
         ) : null}
 
-        {/* Images */}
+        {/* Mixed uploader */}
         <div className="flex flex-col gap-2">
           <p className="text-[11px] text-zinc-600 font-medium">
-            图片参考（单张不超过 5MB）
+            图片/文件参考（后端按后缀自动识别）
           </p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => imageInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border border-zinc-700/50 bg-zinc-900/30 hover:border-zinc-600 hover:text-zinc-200 active:scale-[0.98]"
-            >
-              <ImageIcon size={14} />
-              选择图片
-            </button>
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(e) => void handleAddImages(e.target.files)}
-            />
-          </div>
+          <input
+            ref={uploadInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => void handleAddUploads(e.target.files)}
+          />
 
-          {referenceImages.length > 0 ? (
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {referenceImages.map((img) => (
-                <div
-                  key={img.id}
-                  className="flex-shrink-0 w-[150px] rounded-xl border border-zinc-700/50 bg-zinc-800/40 overflow-hidden"
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {referenceImages.map((img) => (
+              <div
+                key={`image_${img.id}`}
+                className="relative flex-shrink-0 w-28 h-28 rounded-xl border border-zinc-700/50 bg-zinc-800/40 overflow-hidden"
+                title={img.filename}
+              >
+                <button
+                  type="button"
+                  aria-label={`移除 ${img.filename}`}
+                  onClick={() => handleRemoveImage(img.id)}
+                  className="absolute top-1.5 left-1.5 z-10 w-7 h-7 rounded-md bg-zinc-900/70 border border-zinc-700/60 hover:bg-zinc-900/90 transition-all duration-150 active:scale-[0.98] flex items-center justify-center"
                 >
-                  <div className="h-[80px] bg-white/5 flex items-center justify-center border-b border-zinc-700/50">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={img.dataUrl}
-                      alt={img.filename}
-                      className="w-full h-full object-cover opacity-85"
-                    />
-                  </div>
-                  <div className="p-2">
-                    <p className="text-[10px] text-zinc-500 font-mono truncate">
+                  <X size={14} className="text-zinc-200" />
+                </button>
+                <div className="absolute inset-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.dataUrl}
+                    alt={img.filename}
+                    className="w-full h-full object-cover opacity-90"
+                  />
+                </div>
+                <div className="absolute left-0 right-0 bottom-0 p-2.5 bg-black/30 pointer-events-none">
+                  <div className="flex flex-col gap-1.5">
+                    <p className="text-[10px] text-zinc-200 font-mono truncate leading-tight">
                       {img.filename}
                     </p>
-                    <p className="text-[10px] text-zinc-600 font-mono">
+                    <p className="text-[9px] text-zinc-200/70 font-mono leading-tight">
                       {Math.round((img.size / 1024) * 10) / 10} KB
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveImage(img.id)}
-                      className="mt-2 w-full px-2 py-1 rounded-md text-[11px] text-zinc-300 border border-zinc-700/50 hover:bg-zinc-700/30 transition-all duration-150 active:scale-[0.98]"
-                    >
-                      移除
-                    </button>
                   </div>
                 </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
+              </div>
+            ))}
 
-        {/* Files */}
-        <div className="flex flex-col gap-2">
-          <p className="text-[11px] text-zinc-600 font-medium">
-            文件参考（单个不超过 5MB）
-          </p>
-          <div className="flex flex-wrap gap-2">
+            {referenceFiles.map((f) => (
+              <div
+                key={`file_${f.id}`}
+                className="relative flex-shrink-0 w-28 h-28 rounded-xl border border-zinc-700/50 bg-zinc-800/40 overflow-hidden px-2 py-2"
+                title={f.filename}
+              >
+                <button
+                  type="button"
+                  aria-label={`移除 ${f.filename}`}
+                  onClick={() => handleRemoveFile(f.id)}
+                  className="absolute top-1.5 left-1.5 z-10 w-7 h-7 rounded-md bg-zinc-900/70 border border-zinc-700/60 hover:bg-zinc-900/90 transition-all duration-150 active:scale-[0.98] flex items-center justify-center"
+                >
+                  <X size={14} className="text-zinc-200" />
+                </button>
+
+                <div className="absolute left-0 right-0 bottom-0 p-2.5 bg-black/25 pointer-events-none">
+                  <div className="flex flex-col items-start gap-1.5">
+                    <FileText
+                      size={18}
+                      className="text-zinc-400 -translate-y-[12px]"
+                    />
+                    <p className="text-[10px] text-zinc-200 font-mono truncate leading-tight w-full">
+                      {f.filename}
+                    </p>
+                    <p className="text-[9px] text-zinc-200/70 font-mono leading-tight">
+                      {Math.round((f.size / 1024) * 10) / 10} KB
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border border-zinc-700/50 bg-zinc-900/30 hover:border-zinc-600 hover:text-zinc-200 active:scale-[0.98]"
+              onClick={() => uploadInputRef.current?.click()}
+              className="flex-shrink-0 w-28 h-28 rounded-xl border border-zinc-700/50 bg-zinc-900/30 hover:border-zinc-600 hover:bg-zinc-900/45 transition-all duration-150 active:scale-[0.98] focus:outline-none focus:ring-1 focus:ring-blue-500/50 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="上传图片或文件"
+              title="上传图片或文件"
+              disabled={isGenerating}
             >
-              <FileText size={14} />
-              选择文件
+              <Plus size={22} className="text-zinc-400" />
             </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => void handleAddFiles(e.target.files)}
-            />
           </div>
-
-          {referenceFiles.length > 0 ? (
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {referenceFiles.map((f) => (
-                <div
-                  key={f.id}
-                  className="flex-shrink-0 w-[180px] rounded-xl border border-zinc-700/50 bg-zinc-800/40 overflow-hidden px-3 py-2"
-                >
-                  <p className="text-[11px] text-zinc-300 font-mono truncate">
-                    {f.filename}
-                  </p>
-                  <p className="text-[10px] text-zinc-600 font-mono">
-                    {Math.round((f.size / 1024) * 10) / 10} KB
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveFile(f.id)}
-                    className="mt-2 w-full px-2 py-1 rounded-md text-[11px] text-zinc-300 border border-zinc-700/50 hover:bg-zinc-700/30 transition-all duration-150 active:scale-[0.98]"
-                  >
-                    移除
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
         </div>
 
         {referenceError ? (

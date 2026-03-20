@@ -145,11 +145,16 @@ export default function MainApp() {
       if (ctx) {
         formData.append("referenceContextText", ctx);
       } else {
+        // 统一提交给后端：由后端根据后缀判断是图片还是文档
         for (const img of referenceImages) {
-          if (img.file) formData.append("referenceImages", img.file, img.filename);
+          if (img.file) {
+            formData.append("referenceUploads", img.file, img.filename);
+          }
         }
         for (const f of referenceFiles) {
-          if (f.file) formData.append("referenceFiles", f.file, f.filename);
+          if (f.file) {
+            formData.append("referenceUploads", f.file, f.filename);
+          }
         }
       }
 

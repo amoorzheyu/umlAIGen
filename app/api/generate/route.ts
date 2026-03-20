@@ -40,6 +40,28 @@ export async function POST(req: NextRequest) {
 
         let referenceImages: File[] = [];
         let referenceFiles: File[] = [];
+        let referenceUploads: File[] = [];
+
+        const isProbablyImage = (file: File) => {
+          if (file.type?.startsWith("image/")) return true;
+          const lower = file.name.toLowerCase();
+          return /\.(png|jpe?g|gif|webp|bmp|svg|tiff?)$/.test(lower);
+        };
+
+        const guessImageMimeTypeFromName = (file: File) => {
+          if (file.type?.startsWith("image/")) return file.type;
+          const lower = file.name.toLowerCase();
+          if (lower.endsWith(".png")) return "image/png";
+          if (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
+            return "image/jpeg";
+          if (lower.endsWith(".gif")) return "image/gif";
+          if (lower.endsWith(".webp")) return "image/webp";
+          if (lower.endsWith(".bmp")) return "image/bmp";
+          if (lower.endsWith(".svg")) return "image/svg+xml";
+          if (lower.endsWith(".tif") || lower.endsWith(".tiff"))
+            return "image/tiff";
+          return "image/*";
+        };
 
         // 兼容旧 JSON：只支持 description，不做参考抽取
         if (contentType.includes("application/json")) {
@@ -69,13 +91,24 @@ export async function POST(req: NextRequest) {
           const ctx = formData.get("referenceContextText");
           referenceContextText = typeof ctx === "string" ? ctx : "";
 
-          referenceImages = formData
-            .getAll("referenceImages")
+          referenceUploads = formData
+            .getAll("referenceUploads")
             .filter(isUploadFile);
 
-          referenceFiles = formData
-            .getAll("referenceFiles")
-            .filter(isUploadFile);
+          // 新版：统一字段 referenceUploads，由后端按后缀/类型分流。
+          // 旧版：仍兼容 referenceImages / referenceFiles 两字段。
+          if (referenceUploads.length > 0) {
+            referenceImages = referenceUploads.filter(isProbablyImage);
+            referenceFiles = referenceUploads.filter((f) => !isProbablyImage(f));
+          } else {
+            referenceImages = formData
+              .getAll("referenceImages")
+              .filter(isUploadFile);
+
+            referenceFiles = formData
+              .getAll("referenceFiles")
+              .filter(isUploadFile);
+          }
         }
 
         if (!description.trim()) {
@@ -186,7 +219,7 @@ export async function POST(req: NextRequest) {
               }
               const arrayBuffer = await img.arrayBuffer();
               const base64 = Buffer.from(arrayBuffer).toString("base64");
-              const mimeType = img.type || "image/*";
+              const mimeType = guessImageMimeTypeFromName(img);
               const dataUrl = `data:${mimeType};base64,${base64}`;
               return extractContextFromImage({
                 dataUrl,
