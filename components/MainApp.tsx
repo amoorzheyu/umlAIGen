@@ -259,7 +259,9 @@ export default function MainApp() {
 
           if (!base64Payload?.dataUrl) return;
 
-          setImageUrl(base64Payload.dataUrl);
+          // TS: `base64Payload.dataUrl` 在 json 解析后是可选类型，这里明确收窄为 string
+          const nextImageDataUrl = base64Payload.dataUrl;
+          setImageUrl(nextImageDataUrl);
           await putUmlAIGenEntry({
             filename: item.filename,
             askedAt,
@@ -267,7 +269,7 @@ export default function MainApp() {
             graphType: item.graphType ?? ("auto" as UmlHint),
             umlCode: item.umlCode,
             remoteImageUrl: item.imageUrl,
-            imageDataUrl: base64Payload.dataUrl,
+            imageDataUrl: nextImageDataUrl,
             size: base64Payload.size ?? item.size ?? 0,
           });
 
@@ -277,7 +279,7 @@ export default function MainApp() {
               h.filename === item.filename
                 ? {
                     ...h,
-                    imageUrl: base64Payload.dataUrl,
+                    imageUrl: nextImageDataUrl,
                     askedAt,
                     question: item.question ?? "",
                     graphType: item.graphType ?? ("auto" as UmlHint),
@@ -296,16 +298,16 @@ export default function MainApp() {
     // h-[100dvh] + overflow-hidden = no browser-level scroll ever
     <div className="h-[100dvh] overflow-hidden flex flex-col">
       {/* ── Header ──────────────────────────────────────────── */}
-      <header className="flex-shrink-0 flex items-center justify-between px-4 lg:px-6 h-14 border-b border-zinc-800/80 bg-[#09090b]/90 backdrop-blur-md z-10">
-        <div className="flex items-center gap-2.5">
+      <header className="flex-shrink-0 flex items-center justify-between px-4 lg:px-6 h-14 border-b border-zinc-800/80 bg-[#09090b]/90 backdrop-blur-md z-10 shadow-[0_10px_30px_-20px_rgba(0,0,0,0.7)]">
+        <div className="flex items-center gap-3">
           <div className="w-7 h-7 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
             <Pulse size={15} className="text-blue-400" weight="fill" />
           </div>
-          <span className="text-sm font-semibold tracking-tight">
-            UML<span className="text-blue-400">.</span>AI
+          <span className="text-sm sm:text-base font-semibold tracking-tight">
+            UML <span className="text-blue-400">AI</span> Generator
           </span>
-          <span className="hidden sm:inline-block text-xs text-zinc-600 font-medium border border-zinc-800 px-2 py-0.5 rounded-full">
-            Generator
+          <span className="hidden sm:inline-flex items-center justify-center text-[11px] font-mono text-zinc-500 border border-zinc-800 px-2 py-0.5 rounded-full">
+            uml-ai-gen
           </span>
         </div>
 
@@ -324,11 +326,11 @@ export default function MainApp() {
           </motion.button>
 
           <a
-            href="https://plantuml.com"
+            href="https://github.com/amoorzheyu/umlAIGen"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center justify-center w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-all duration-150"
-            title="PlantUML 文档"
+            title="GitHub 仓库"
           >
             <GithubLogo size={15} />
           </a>
