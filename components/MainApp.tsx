@@ -230,11 +230,7 @@ export default function MainApp() {
     setActiveTab("code");
 
     // 如果是远程链接（非 dataUrl），点击后补做 base64 缓存，保证展示走本地
-    if (
-      item.imageUrl &&
-      !item.imageUrl.startsWith("data:") &&
-      item.imageUrl.startsWith("https://www.plantuml.com/plantuml/png/")
-    ) {
+    if (item.imageUrl && !item.imageUrl.startsWith("data:")) {
       (async () => {
         try {
           const cached = await getUmlAIGenEntry(item.filename);

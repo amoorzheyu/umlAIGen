@@ -24,10 +24,21 @@ export function encodePlantUML(text: string): string {
     .join("");
 }
 
+function getRequiredEnv(key: string): string {
+  const v = process.env[key];
+  if (!v || !v.trim()) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  // 允许用户配置时带或不带结尾 `/`，这里统一裁剪掉
+  return v.trim().replace(/\/+$/, "");
+}
+
 export function getPlantUMLPngUrl(umlCode: string): string {
-  return `https://www.plantuml.com/plantuml/png/${encodePlantUML(umlCode)}`;
+  const base = getRequiredEnv("PLANTUML_PNG_BASE_URL");
+  return `${base}/${encodePlantUML(umlCode)}`;
 }
 
 export function getPlantUMLSvgUrl(umlCode: string): string {
-  return `https://www.plantuml.com/plantuml/svg/${encodePlantUML(umlCode)}`;
+  const base = getRequiredEnv("PLANTUML_SVG_BASE_URL");
+  return `${base}/${encodePlantUML(umlCode)}`;
 }

@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
+function getRequiredEnv(key: string): string {
+  const v = process.env[key];
+  if (!v || !v.trim()) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  return v.trim().replace(/\/+$/, "");
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -12,8 +20,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 当前项目仅生成 PlantUML PNG
-    if (!imageUrl.startsWith("https://www.plantuml.com/plantuml/png/")) {
+    // 当前项目仅生成 PlantUML PNG（用环境变量配置允许前缀，避免硬编码泄露）
+    const base = getRequiredEnv("PLANTUML_PNG_BASE_URL");
+    const allowedPrefix = `${base}/`;
+    if (!imageUrl.startsWith(allowedPrefix)) {
       return NextResponse.json(
         { error: "仅支持 PlantUML png 地址" },
         { status: 400 }
