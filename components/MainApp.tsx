@@ -10,6 +10,11 @@ import {
 import InputPanel, { type UmlHint } from "./InputPanel";
 import PreviewPanel, { type PreviewTab } from "./PreviewPanel";
 import HistoryList, { type HistoryItem } from "./HistoryList";
+import {
+  getUmlAIGenEntry,
+  listUmlAIGenEntries,
+  putUmlAIGenEntry,
+} from "@/lib/umlAIGenIdb";
 
 export default function MainApp() {
   const [description, setDescription] = useState("");
@@ -30,9 +35,33 @@ export default function MainApp() {
   const fetchHistory = useCallback(async () => {
     setLoadingHistory(true);
     try {
+      // 以 IndexedDB 为主：后端只是备份（尽量不依赖它）
+      let cached: Awaited<ReturnType<typeof listUmlAIGenEntries>> = [];
+      try {
+        cached = await listUmlAIGenEntries(30);
+      } catch {
+        cached = [];
+      }
+      if (cached.length > 0) {
+        setHistory(
+          cached.map((c) => ({
+            filename: c.filename,
+            createdAt: c.createdAt,
+            umlCode: c.umlCode,
+            imageUrl: c.imageDataUrl,
+            size: c.size,
+            question: c.question,
+            graphType: c.graphType,
+            askedAt: c.askedAt,
+          }))
+        );
+        return;
+      }
+
+      // 没有本地缓存时，才读取后端备份（并在点击条目后补做 base64 缓存）
       const res = await fetch("/api/history");
       const data = await res.json();
-      setHistory(data.items ?? []);
+      setHistory((data.items ?? []) as HistoryItem[]);
     } catch {
       // silent
     } finally {
@@ -46,6 +75,10 @@ export default function MainApp() {
 
   const handleGenerate = async () => {
     if (!description.trim() || isGenerating) return;
+
+    const askedAt = Date.now();
+    const askedQuestion = description;
+    const askedGraphType = hint;
 
     setIsGenerating(true);
     setError(null);
@@ -127,12 +160,52 @@ export default function MainApp() {
           if (eventType === "token" && payload.chunk) {
             setUmlCode((prev) => prev + payload.chunk);
           } else if (eventType === "done") {
-            setUmlCode(payload.umlCode ?? "");
-            setImageUrl(payload.imageUrl ?? "");
-            setFilename(payload.filename ?? "");
+            const nextUmlCode = payload.umlCode ?? "";
+            const nextFilename = payload.filename ?? "";
+            const nextRemoteImageUrl = payload.imageUrl ?? "";
 
-            if (showHistory) fetchHistory();
-            setIsGenerating(false);
+            setUmlCode(nextUmlCode);
+            setFilename(nextFilename);
+            // 先用远程图快速展示；随后转成 base64 并用本地缓存覆盖。
+            setImageUrl(nextRemoteImageUrl);
+
+            if (nextFilename && nextRemoteImageUrl) {
+              try {
+                const base64Res = await fetch("/api/image-base64", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ imageUrl: nextRemoteImageUrl }),
+                });
+
+                if (base64Res.ok) {
+                  const base64Payload = (await base64Res.json()) as {
+                    dataUrl: string;
+                    size: number;
+                  };
+
+                  if (base64Payload?.dataUrl) {
+                    setImageUrl(base64Payload.dataUrl);
+
+                    await putUmlAIGenEntry({
+                      filename: nextFilename,
+                      askedAt,
+                      question: askedQuestion,
+                      graphType: askedGraphType,
+                      umlCode: nextUmlCode,
+                      remoteImageUrl: nextRemoteImageUrl,
+                      imageDataUrl: base64Payload.dataUrl,
+                      size: base64Payload.size ?? 0,
+                    });
+                  }
+                }
+              } catch {
+                // 缓存失败不影响主流程（仍然保留远程预览）
+              }
+            }
+
+            if (showHistory) {
+              await fetchHistory();
+            }
             return;
           } else if (eventType === "error") {
             throw new Error(payload.message ?? "生成失败，请重试");
@@ -150,9 +223,72 @@ export default function MainApp() {
     setUmlCode(item.umlCode);
     setImageUrl(item.imageUrl);
     setFilename(item.filename);
-    setDescription("");
+    setDescription(item.question ?? "");
+    if (item.graphType) setHint(item.graphType);
     setError(null);
     setActiveTab("code");
+
+    // 如果是远程链接（非 dataUrl），点击后补做 base64 缓存，保证展示走本地
+    if (
+      item.imageUrl &&
+      !item.imageUrl.startsWith("data:") &&
+      item.imageUrl.startsWith("https://www.plantuml.com/plantuml/png/")
+    ) {
+      (async () => {
+        try {
+          const cached = await getUmlAIGenEntry(item.filename);
+          if (cached?.imageDataUrl) {
+            setImageUrl(cached.imageDataUrl);
+            return;
+          }
+
+          const askedAt = Date.now();
+
+          const base64Res = await fetch("/api/image-base64", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageUrl: item.imageUrl }),
+          });
+
+          if (!base64Res.ok) return;
+          const base64Payload = (await base64Res.json()) as {
+            dataUrl?: string;
+            size?: number;
+          };
+
+          if (!base64Payload?.dataUrl) return;
+
+          setImageUrl(base64Payload.dataUrl);
+          await putUmlAIGenEntry({
+            filename: item.filename,
+            askedAt,
+            question: item.question ?? "",
+            graphType: item.graphType ?? ("auto" as UmlHint),
+            umlCode: item.umlCode,
+            remoteImageUrl: item.imageUrl,
+            imageDataUrl: base64Payload.dataUrl,
+            size: base64Payload.size ?? item.size ?? 0,
+          });
+
+          // 同步刷新当前历史列表中该条目的缩略图/预览来源
+          setHistory((prev) =>
+            prev.map((h) =>
+              h.filename === item.filename
+                ? {
+                    ...h,
+                    imageUrl: base64Payload.dataUrl,
+                    askedAt,
+                    question: item.question ?? "",
+                    graphType: item.graphType ?? ("auto" as UmlHint),
+                  }
+                : h
+            )
+          );
+        } catch {
+          // 补缓存失败不影响展示
+        }
+      })();
+    }
   };
 
   return (

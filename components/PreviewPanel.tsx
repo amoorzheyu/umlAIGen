@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Image as ImageIcon,
@@ -34,6 +34,11 @@ export default function PreviewPanel({
   const [copied, setCopied] = useState(false);
   const [imgError, setImgError] = useState(false);
 
+  // 当 imageUrl 被替换（例如从远程切到 IndexedDB dataUrl）时，清除旧错误状态
+  useEffect(() => {
+    setImgError(false);
+  }, [imageUrl]);
+
   const isEmpty = !umlCode && !isGenerating;
   const shouldShowSkeleton = isGenerating && !umlCode;
 
@@ -60,7 +65,8 @@ export default function PreviewPanel({
     const a = document.createElement("a");
     a.href = imageUrl;
     a.download = (filename || "diagram").replace(".wsd", ".png");
-    a.target = "_blank";
+    // dataUrl 直接下载更可靠；远程链接再打开新窗口
+    if (!imageUrl.startsWith("data:")) a.target = "_blank";
     a.click();
   };
 

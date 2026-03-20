@@ -2,13 +2,19 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Clock, File } from "@phosphor-icons/react";
+import type { UmlHint } from "./InputPanel";
 
 export interface HistoryItem {
   filename: string;
-  createdAt: string;
+  createdAt: string; // 兼容旧记录：由后端文件名解析得到
   umlCode: string;
   imageUrl: string;
   size: number;
+
+  // 新增：IndexedDB 缓存的增强元信息
+  question?: string;
+  graphType?: UmlHint;
+  askedAt?: number; // ms timestamp
 }
 
 interface HistoryListProps {
@@ -24,6 +30,15 @@ export default function HistoryList({
   onSelect,
   onClose,
 }: HistoryListProps) {
+  const graphTypeLabel: Record<UmlHint, string> = {
+    auto: "自动判断",
+    sequence: "时序图",
+    class: "类图",
+    activity: "活动图",
+    usecase: "用例图",
+    state: "状态图",
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -91,8 +106,17 @@ export default function HistoryList({
                   </div>
                   {/* Meta */}
                   <div className="p-2">
-                    <p className="text-[10px] text-zinc-400 font-mono truncate leading-relaxed">
-                      {item.createdAt}
+                    <p className="text-[10px] text-zinc-500 font-mono truncate leading-relaxed">
+                      {item.question ? item.question : "未记录问题"}
+                    </p>
+                    <p className="text-[10px] text-zinc-600 font-mono truncate leading-relaxed">
+                      {item.graphType ? graphTypeLabel[item.graphType] : "未记录图类型"}{" "}
+                      •{" "}
+                      {typeof item.askedAt === "number"
+                        ? new Date(item.askedAt).toLocaleString("zh-CN", {
+                            hour12: false,
+                          })
+                        : item.createdAt}
                     </p>
                     <p className="text-[10px] text-zinc-600 font-mono">
                       {(item.size / 1024).toFixed(1)} KB
