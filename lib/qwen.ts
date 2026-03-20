@@ -196,3 +196,116 @@ export async function generateUMLCodeStream(
 
   return normalizePlantUMLFromModelOutput(rawContent);
 }
+
+const EXTRACT_IMAGE_SYSTEM_PROMPT = `你是 UML 参考资料分析助手。
+
+任务：从用户上传的“参考图片”中抽取与 UML 生成最相关的信息（尽量包含：实体/角色、对象关系、流程步骤、状态/条件、关键名词）。
+
+输出规则（必须遵守）：
+1. 只输出“结构化要点文本”，不要输出解释、不要输出 markdown 标题。
+2. 使用中文，并以固定字段开头，字段之间用换行分隔：
+   - 实体/角色：
+   - 关系/流程：
+   - 状态/条件（如有）：
+3. 内容尽量简洁，长度建议 <= 1000 个汉字。`;
+
+const EXTRACT_FILE_SYSTEM_PROMPT = `你是 UML 参考资料分析助手。
+
+任务：从用户上传的“参考文档文本”中抽取与 UML 生成最相关的信息（尽量包含：实体/角色、对象关系、流程步骤、状态/条件、关键名词、约束）。
+
+输出规则（必须遵守）：
+1. 只输出“结构化要点文本”，不要输出解释、不要输出 markdown 标题。
+2. 使用中文，并以固定字段开头，字段之间用换行分隔：
+   - 实体/角色：
+   - 关系/流程：
+   - 状态/条件（如有）：
+   - 关键约束/术语：
+3. 内容尽量简洁，长度建议 <= 1200 个汉字。`;
+
+function sanitizeExtractionText(text: string): string {
+  // 避免模型输出多余 code fence
+  return text
+    .replace(/```(?:text|md|markdown)?/gi, "")
+    .replace(/```/g, "")
+    .replace(/\r\n/g, "\n")
+    .trim();
+}
+
+async function callChatCompletion(params: {
+  messages: Array<{ role: string; content: any }>;
+  max_tokens?: number;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const url = getChatUrl();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: MODEL_NAME,
+      messages: params.messages,
+      temperature: 0.2,
+      max_tokens: params.max_tokens ?? 1024,
+      chat_template_kwargs: { enable_thinking: false },
+    }),
+    signal: params.signal,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Qwen API ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  const content: string = data.choices?.[0]?.message?.content ?? "";
+  return sanitizeExtractionText(content);
+}
+
+export async function extractContextFromImage(params: {
+  dataUrl: string;
+  hint: string;
+  description: string;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const { dataUrl, hint, description, signal } = params;
+
+  const userText = `图类型提示（可用于更准确抽取）：${hint}\n用户描述：${description}\n\n请从图片中抽取 UML 相关要点，按固定字段输出。`;
+
+  return await callChatCompletion({
+    signal,
+    messages: [
+      { role: "system", content: EXTRACT_IMAGE_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: userText },
+          { type: "image_url", image_url: { url: dataUrl } },
+        ],
+      },
+    ],
+    max_tokens: 1024,
+  });
+}
+
+export async function extractContextFromFileText(params: {
+  fileText: string;
+  filename: string;
+  hint: string;
+  description: string;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const { fileText, filename, hint, description, signal } = params;
+
+  const userText = `文件名：${filename}\n图类型提示（可用于更准确抽取）：${hint}\n用户描述：${description}\n\n以下是参考文档内容，请抽取 UML 相关要点（按固定字段输出）：\n\n${fileText}`;
+
+  return await callChatCompletion({
+    signal,
+    messages: [
+      { role: "system", content: EXTRACT_FILE_SYSTEM_PROMPT },
+      { role: "user", content: userText },
+    ],
+    max_tokens: 1024,
+  });
+}

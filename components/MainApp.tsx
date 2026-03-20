@@ -7,7 +7,11 @@ import {
   GithubLogo,
   Pulse,
 } from "@phosphor-icons/react";
-import InputPanel, { type UmlHint } from "./InputPanel";
+import InputPanel, {
+  type UmlHint,
+  type ReferenceFilePreview,
+  type ReferenceImagePreview,
+} from "./InputPanel";
 import PreviewPanel, { type PreviewTab } from "./PreviewPanel";
 import HistoryList, { type HistoryItem } from "./HistoryList";
 import {
@@ -24,6 +28,15 @@ export default function MainApp() {
   const [filename, setFilename] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [referenceImages, setReferenceImages] = useState<
+    ReferenceImagePreview[]
+  >([]);
+  const [referenceFiles, setReferenceFiles] = useState<
+    ReferenceFilePreview[]
+  >([]);
+  const [referenceContextText, setReferenceContextText] =
+    useState<string>("");
 
   // Controlled tab state — lifted here so generation can switch to "code"
   const [activeTab, setActiveTab] = useState<PreviewTab>("image");
@@ -53,6 +66,9 @@ export default function MainApp() {
             question: c.question,
             graphType: c.graphType,
             askedAt: c.askedAt,
+            referenceContextText: c.referenceContextText,
+            referenceImages: c.referenceImages,
+            referenceFiles: c.referenceFiles,
           }))
         );
         return;
@@ -72,6 +88,25 @@ export default function MainApp() {
   useEffect(() => {
     if (showHistory) fetchHistory();
   }, [showHistory, fetchHistory]);
+
+  const handleReferenceChange = (
+    images: ReferenceImagePreview[],
+    files: ReferenceFilePreview[]
+  ) => {
+    // 如果是从历史恢复的预览（没有 file 对象），当用户开始修改引用集合时，
+    // 这些预览无法用于“抽取”，因此需要丢弃以避免后端收不到文件。
+    setReferenceImages(images.filter((i) => Boolean(i.file)));
+    setReferenceFiles(files.filter((f) => Boolean(f.file)));
+    // references 发生变化 => 参考抽取上下文必须作废
+    setReferenceContextText("");
+  };
+
+  const clearReferenceContext = () => {
+    setReferenceContextText("");
+    // 清空上下文后重新抽取需要原始文件；历史预览只有 dataUrl/元信息，没有 file。
+    setReferenceImages((prev) => prev.filter((i) => Boolean(i.file)));
+    setReferenceFiles((prev) => prev.filter((f) => Boolean(f.file)));
+  };
 
   const handleGenerate = async () => {
     if (!description.trim() || isGenerating) return;
@@ -102,10 +137,25 @@ export default function MainApp() {
         : "";
 
     try {
+      const formData = new FormData();
+      formData.append("description", promptPrefix + description);
+      formData.append("hint", hint);
+
+      const ctx = referenceContextText.trim();
+      if (ctx) {
+        formData.append("referenceContextText", ctx);
+      } else {
+        for (const img of referenceImages) {
+          if (img.file) formData.append("referenceImages", img.file, img.filename);
+        }
+        for (const f of referenceFiles) {
+          if (f.file) formData.append("referenceFiles", f.file, f.filename);
+        }
+      }
+
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: promptPrefix + description }),
+        body: formData,
       });
 
       if (!res.ok) {
@@ -163,9 +213,12 @@ export default function MainApp() {
             const nextUmlCode = payload.umlCode ?? "";
             const nextFilename = payload.filename ?? "";
             const nextRemoteImageUrl = payload.imageUrl ?? "";
+            const nextReferenceContextText =
+              payload.referenceContextText ?? referenceContextText;
 
             setUmlCode(nextUmlCode);
             setFilename(nextFilename);
+            setReferenceContextText(nextReferenceContextText);
             // 先用远程图快速展示；随后转成 base64 并用本地缓存覆盖。
             setImageUrl(nextRemoteImageUrl);
             setActiveTab("image");
@@ -196,6 +249,18 @@ export default function MainApp() {
                       remoteImageUrl: nextRemoteImageUrl,
                       imageDataUrl: base64Payload.dataUrl,
                       size: base64Payload.size ?? 0,
+                      referenceContextText: nextReferenceContextText,
+                      referenceImages: referenceImages.map((i) => ({
+                        filename: i.filename,
+                        mimeType: i.mimeType,
+                        dataUrl: i.dataUrl,
+                        size: i.size,
+                      })),
+                      referenceFiles: referenceFiles.map((f) => ({
+                        filename: f.filename,
+                        mimeType: f.mimeType,
+                        size: f.size,
+                      })),
                     });
                   }
                 }
@@ -226,6 +291,24 @@ export default function MainApp() {
     setFilename(item.filename);
     setDescription(item.question ?? "");
     if (item.graphType) setHint(item.graphType);
+    setReferenceContextText(item.referenceContextText ?? "");
+    setReferenceImages(
+      (item.referenceImages ?? []).map((img) => ({
+        id: `${img.filename}_${img.size}`,
+        filename: img.filename,
+        mimeType: img.mimeType,
+        dataUrl: img.dataUrl,
+        size: img.size,
+      }))
+    );
+    setReferenceFiles(
+      (item.referenceFiles ?? []).map((f) => ({
+        id: `${f.filename}_${f.size}`,
+        filename: f.filename,
+        mimeType: f.mimeType,
+        size: f.size,
+      }))
+    );
     setError(null);
     setActiveTab("code");
 
@@ -267,6 +350,9 @@ export default function MainApp() {
             remoteImageUrl: item.imageUrl,
             imageDataUrl: nextImageDataUrl,
             size: base64Payload.size ?? item.size ?? 0,
+            referenceContextText: item.referenceContextText,
+            referenceImages: item.referenceImages,
+            referenceFiles: item.referenceFiles,
           });
 
           // 同步刷新当前历史列表中该条目的缩略图/预览来源
@@ -279,6 +365,9 @@ export default function MainApp() {
                     askedAt,
                     question: item.question ?? "",
                     graphType: item.graphType ?? ("auto" as UmlHint),
+                    referenceContextText: item.referenceContextText,
+                    referenceImages: item.referenceImages,
+                    referenceFiles: item.referenceFiles,
                   }
                 : h
             )
@@ -349,6 +438,11 @@ export default function MainApp() {
             onChange={setDescription}
             onHintChange={setHint}
             onGenerate={handleGenerate}
+            referenceImages={referenceImages}
+            referenceFiles={referenceFiles}
+            referenceContextText={referenceContextText}
+            onReferenceChange={handleReferenceChange}
+            onClearReferenceContext={clearReferenceContext}
           />
         </div>
 

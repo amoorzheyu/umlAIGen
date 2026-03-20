@@ -15,6 +15,20 @@ export interface HistoryItem {
   question?: string;
   graphType?: UmlHint;
   askedAt?: number; // ms timestamp
+
+  // 上传参考与抽取上下文（可选）
+  referenceContextText?: string;
+  referenceImages?: Array<{
+    filename: string;
+    mimeType: string;
+    dataUrl: string;
+    size: number;
+  }>;
+  referenceFiles?: Array<{
+    filename: string;
+    mimeType: string;
+    size: number;
+  }>;
 }
 
 interface HistoryListProps {

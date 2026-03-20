@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
-import { generateUMLCodeStream } from "@/lib/qwen";
+import {
+  extractContextFromFileText,
+  extractContextFromImage,
+  generateUMLCodeStream,
+} from "@/lib/qwen";
 import { getPlantUMLPngUrl } from "@/lib/plantuml";
+import * as pdfParseModule from "pdf-parse";
+import mammoth from "mammoth";
 
 function shouldStoreOutput(): boolean {
   const v = process.env.UMLAIGEN_STORE_OUTPUT;
@@ -21,28 +27,237 @@ function buildFilename(): string {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const description: string = body?.description ?? "";
-
-  if (!description.trim()) {
-    return NextResponse.json({ error: "请输入 UML 描述内容" }, { status: 400 });
-  }
-
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const safeDescription = description.trim();
+        const contentType = req.headers.get("content-type") ?? "";
+
+        let description = "";
+        let graphHint = "auto";
+        let referenceContextText = "";
+
+        let referenceImages: File[] = [];
+        let referenceFiles: File[] = [];
+
+        // 兼容旧 JSON：只支持 description，不做参考抽取
+        if (contentType.includes("application/json")) {
+          const body = await req.json();
+          description = body?.description ?? "";
+          graphHint = body?.hint ?? "auto";
+          referenceContextText = body?.referenceContextText ?? "";
+        } else {
+          const formData = await req.formData();
+
+          const isUploadFile = (v: unknown): v is File => {
+            const vv = v as any;
+            return (
+              vv &&
+              typeof vv.arrayBuffer === "function" &&
+              typeof vv.name === "string" &&
+              typeof vv.size === "number"
+            );
+          };
+
+          const d = formData.get("description");
+          description = typeof d === "string" ? d : "";
+
+          const h = formData.get("hint");
+          graphHint = typeof h === "string" && h.trim() ? h : "auto";
+
+          const ctx = formData.get("referenceContextText");
+          referenceContextText = typeof ctx === "string" ? ctx : "";
+
+          referenceImages = formData
+            .getAll("referenceImages")
+            .filter(isUploadFile);
+
+          referenceFiles = formData
+            .getAll("referenceFiles")
+            .filter(isUploadFile);
+        }
+
+        if (!description.trim()) {
+          controller.enqueue(
+            encoder.encode(
+              `event: error\ndata: ${JSON.stringify({
+                message: "请输入 UML 描述内容",
+              })}\n\n`
+            )
+          );
+          return;
+        }
 
         controller.enqueue(
-          encoder.encode(
-            `event: started\ndata: ${JSON.stringify({})}\n\n`
-          )
+          encoder.encode(`event: started\ndata: ${JSON.stringify({})}\n\n`)
         );
 
+        const safeDescription = description.trim();
+
+        const buildReferenceBlock = async () => {
+          // 若前端已提供抽取上下文（例如历史复用），直接跳过抽取
+          if (referenceContextText.trim()) return referenceContextText.trim();
+
+          const IMAGE_MAX_BYTES = 5_000_000;
+          const FILE_MAX_BYTES = 5_000_000;
+          const TOTAL_MAX_BYTES = 10_000_000;
+          const MAX_ITEMS = 20;
+
+          const totalBytes =
+            referenceImages.reduce((s, i) => s + i.size, 0) +
+            referenceFiles.reduce((s, f) => s + f.size, 0);
+
+          if (totalBytes > TOTAL_MAX_BYTES) {
+            throw new Error("参考资料总大小超过 10MB 限制。");
+          }
+          if (referenceImages.length + referenceFiles.length > MAX_ITEMS) {
+            throw new Error("参考资料数量过多，请减少文件数。");
+          }
+
+          async function mapWithConcurrency<T, R>(
+            items: T[],
+            concurrency: number,
+            worker: (item: T, idx: number) => Promise<R>
+          ): Promise<R[]> {
+            const results: R[] = new Array(items.length);
+            let cursor = 0;
+
+            const runners = Array.from({ length: concurrency }).map(async () => {
+              while (cursor < items.length) {
+                const idx = cursor++;
+                results[idx] = await worker(items[idx], idx);
+              }
+            });
+
+            await Promise.all(runners);
+            return results;
+          }
+
+          async function fileToText(file: File): Promise<string> {
+            const arrayBuffer = await file.arrayBuffer();
+            const mimeType = file.type || "";
+            const lowerName = file.name.toLowerCase();
+
+            const tryDecodeAsText = () => {
+              const decoded = new TextDecoder("utf-8", { fatal: false }).decode(
+                arrayBuffer
+              );
+              return decoded.trim();
+            };
+
+            const isLikelyText =
+              mimeType.startsWith("text/") ||
+              /\.(txt|md|json|csv|log|yaml|yml|xml|html|css|js|ts|py|java|c|cpp|go|rb|php|sh|bat)$/i.test(
+                lowerName
+              );
+
+            if (isLikelyText) {
+              return tryDecodeAsText();
+            }
+
+            if (mimeType === "application/pdf" || lowerName.endsWith(".pdf")) {
+              const pdfParseFn =
+                (pdfParseModule as any).default ?? pdfParseModule;
+              const parsed = await pdfParseFn(Buffer.from(arrayBuffer));
+              return parsed.text?.trim() ?? "";
+            }
+
+            if (
+              mimeType.includes("wordprocessingml") ||
+              lowerName.endsWith(".docx")
+            ) {
+              const parsed = await mammoth.extractRawText({
+                buffer: Buffer.from(arrayBuffer),
+              });
+              return parsed.value?.trim() ?? "";
+            }
+
+            // best-effort：尝试当作文本解码（若失败则返回空串交由上层处理）
+            return tryDecodeAsText();
+          }
+
+          const imageExtractions = await mapWithConcurrency(
+            referenceImages,
+            3,
+            async (img) => {
+              if (img.size > IMAGE_MAX_BYTES) {
+                throw new Error(`图片 ${img.name} 超过 5MB 限制。`);
+              }
+              const arrayBuffer = await img.arrayBuffer();
+              const base64 = Buffer.from(arrayBuffer).toString("base64");
+              const mimeType = img.type || "image/*";
+              const dataUrl = `data:${mimeType};base64,${base64}`;
+              return extractContextFromImage({
+                dataUrl,
+                hint: graphHint,
+                description: safeDescription,
+                signal: req.signal,
+              });
+            }
+          );
+
+          const fileExtractions = await mapWithConcurrency(
+            referenceFiles,
+            3,
+            async (file) => {
+              if (file.size > FILE_MAX_BYTES) {
+                throw new Error(`文件 ${file.name} 超过 5MB 限制。`);
+              }
+
+              const fileText = await fileToText(file);
+              const MAX_FILE_CHARS = 25_000;
+              const normalized = fileText.replace(/\u0000/g, " ").trim();
+              const truncated =
+                normalized.length > MAX_FILE_CHARS
+                  ? normalized.slice(0, MAX_FILE_CHARS)
+                  : normalized;
+
+              const extracted =
+                truncated.length > 0
+                  ? await extractContextFromFileText({
+                      fileText: truncated,
+                      filename: file.name,
+                      hint: graphHint,
+                      description: safeDescription,
+                      signal: req.signal,
+                    })
+                  : `文件名：${file.name}\n- 实体/角色：\n- 关系/流程：\n- 状态/条件（如有）：\n- 关键约束/术语：\n（未能从文档中提取可用文本）`;
+
+              return extracted;
+            }
+          );
+
+          const ctxParts: string[] = [];
+          if (imageExtractions.length > 0) {
+            ctxParts.push("【图片参考提取结果】");
+            ctxParts.push(
+              imageExtractions
+                .map((t, i) => `- 图片${i + 1}：\n${t}`)
+                .join("\n")
+            );
+          }
+          if (fileExtractions.length > 0) {
+            ctxParts.push("【文档参考提取结果】");
+            ctxParts.push(
+              fileExtractions
+                .map((t, i) => `- 文件${i + 1}：\n${t}`)
+                .join("\n")
+            );
+          }
+
+          const built =
+            ctxParts.length > 0
+              ? ctxParts.join("\n") + "\n\n"
+              : "";
+          return built;
+        };
+
+        const referenceBlock = await buildReferenceBlock();
+        const combinedDescription = `${referenceBlock}${safeDescription}`;
+
         const umlCode = await generateUMLCodeStream(
-          safeDescription,
+          combinedDescription,
           (chunk) => {
             controller.enqueue(
               encoder.encode(
@@ -71,6 +286,7 @@ export async function POST(req: NextRequest) {
               umlCode,
               imageUrl,
               filename,
+              referenceContextText: referenceBlock,
             })}\n\n`
           )
         );

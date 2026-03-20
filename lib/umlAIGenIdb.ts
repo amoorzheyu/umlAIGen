@@ -16,6 +16,20 @@ export interface UmlAIGenIdbEntry {
   remoteImageUrl: string; // plantuml png/svgs 的最终链接（备份/追溯用）
   imageDataUrl: string; // data:image/png;base64,...
   size: number; // bytes
+
+  // 上传参考（可选）：用于历史复用生成时的上下文
+  referenceContextText?: string;
+  referenceImages?: Array<{
+    filename: string;
+    mimeType: string;
+    dataUrl: string;
+    size: number;
+  }>;
+  referenceFiles?: Array<{
+    filename: string;
+    mimeType: string;
+    size: number;
+  }>;
 }
 
 const DB_NAME = "uml-ai-gen";
