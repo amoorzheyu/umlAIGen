@@ -168,6 +168,7 @@ export default function MainApp() {
             setFilename(nextFilename);
             // 先用远程图快速展示；随后转成 base64 并用本地缓存覆盖。
             setImageUrl(nextRemoteImageUrl);
+            setActiveTab("image");
 
             if (nextFilename && nextRemoteImageUrl) {
               try {
