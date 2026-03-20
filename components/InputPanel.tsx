@@ -172,11 +172,6 @@ export default function InputPanel({
         )}
       </motion.button>
 
-      {/* Footer tip */}
-      <p className="text-xs text-zinc-600 text-center">
-        生成的 .wsd 文件自动保存至项目{" "}
-        <code className="font-mono text-zinc-500">output/</code> 目录
-      </p>
     </motion.div>
   );
 }

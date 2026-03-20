@@ -12,27 +12,30 @@ import {
   Graph,
 } from "@phosphor-icons/react";
 
+export type PreviewTab = "image" | "code";
+
 interface PreviewPanelProps {
   umlCode: string;
   imageUrl: string;
   filename: string;
   isGenerating: boolean;
+  activeTab: PreviewTab;
+  onTabChange: (tab: PreviewTab) => void;
 }
-
-type Tab = "image" | "code";
 
 export default function PreviewPanel({
   umlCode,
   imageUrl,
   filename,
   isGenerating,
+  activeTab,
+  onTabChange,
 }: PreviewPanelProps) {
-  const [tab, setTab] = useState<Tab>("image");
   const [copied, setCopied] = useState(false);
   const [imgError, setImgError] = useState(false);
 
   const isEmpty = !umlCode && !isGenerating;
-  const isLoading = isGenerating;
+  const shouldShowSkeleton = isGenerating && !umlCode;
 
   const handleCopy = async () => {
     if (!umlCode) return;
@@ -66,64 +69,49 @@ export default function PreviewPanel({
       initial={{ opacity: 0, x: 12 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1], delay: 0.05 }}
-      className="flex flex-col gap-4 min-h-[400px]"
+      className="h-full flex flex-col gap-3"
     >
       {/* Tabs + actions */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-1 p-1 bg-zinc-900 rounded-lg border border-zinc-800">
-          {(["image", "code"] as Tab[]).map((t) => (
+          {(["image", "code"] as PreviewTab[]).map((t) => (
             <button
               key={t}
-              onClick={() => setTab(t)}
+              onClick={() => onTabChange(t)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${
-                tab === t
+                activeTab === t
                   ? "bg-zinc-700 text-zinc-100 shadow-sm"
                   : "text-zinc-500 hover:text-zinc-300"
               }`}
             >
-              {t === "image" ? (
-                <ImageIcon size={13} />
-              ) : (
-                <Code size={13} />
-              )}
+              {t === "image" ? <ImageIcon size={13} /> : <Code size={13} />}
               {t === "image" ? "预览" : "PlantUML 代码"}
             </button>
           ))}
         </div>
 
-        {/* Action buttons — only show when content exists */}
         {umlCode && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="flex items-center gap-1"
           >
-            {tab === "code" ? (
+            {activeTab === "code" ? (
               <>
-                <ActionButton
-                  onClick={handleCopy}
-                  title="复制代码"
-                  active={copied}
-                >
+                <ActionButton onClick={handleCopy} title="复制代码" active={copied}>
                   {copied ? (
                     <Check size={14} className="text-green-400" />
                   ) : (
                     <Copy size={14} />
                   )}
                 </ActionButton>
-                <ActionButton
-                  onClick={handleDownloadCode}
-                  title="下载 .wsd 文件"
-                >
+                <ActionButton onClick={handleDownloadCode} title="下载 .wsd 文件">
                   <DownloadSimple size={14} />
                 </ActionButton>
               </>
             ) : (
               <>
-                <ActionButton
-                  onClick={handleDownloadImage}
-                  title="下载图片"
-                >
+                <ActionButton onClick={handleDownloadImage} title="下载图片">
                   <DownloadSimple size={14} />
                 </ActionButton>
                 <a
@@ -141,23 +129,23 @@ export default function PreviewPanel({
         )}
       </div>
 
-      {/* Content area */}
-      <div className="flex-1 bg-zinc-900 border border-zinc-700/60 rounded-xl overflow-hidden min-h-[360px] relative">
+      {/* Content area — fills remaining height, scrolls internally */}
+      <div className="flex-1 min-h-0 bg-zinc-900 border border-zinc-700/60 rounded-xl overflow-hidden relative">
         <AnimatePresence mode="wait">
-          {isLoading ? (
+          {shouldShowSkeleton ? (
             <LoadingSkeleton key="loading" />
           ) : isEmpty ? (
             <EmptyState key="empty" />
           ) : (
             <motion.div
-              key={`content-${tab}`}
+              key={`content-${activeTab}`}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="h-full"
+              transition={{ duration: 0.15 }}
+              className="absolute inset-0"
             >
-              {tab === "image" ? (
+              {activeTab === "image" ? (
                 <ImageView
                   imageUrl={imageUrl}
                   imgError={imgError}
@@ -177,7 +165,7 @@ export default function PreviewPanel({
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="text-xs text-zinc-600 text-right font-mono"
+          className="flex-shrink-0 text-xs text-zinc-600 text-right font-mono"
         >
           {filename}
         </motion.p>
@@ -265,7 +253,7 @@ function ImageView({
   onLoad: () => void;
 }) {
   return (
-    <div className="h-full flex items-center justify-center p-4 overflow-auto">
+    <div className="absolute inset-0 flex items-center justify-center p-4 overflow-auto">
       {imgError ? (
         <div className="text-center space-y-2 px-6">
           <p className="text-sm text-red-400 font-medium">图片加载失败</p>
@@ -291,7 +279,7 @@ function ImageView({
           alt="UML diagram"
           onError={onError}
           onLoad={onLoad}
-          className="max-w-full max-h-[600px] object-contain rounded-lg"
+          className="max-w-full max-h-full object-contain rounded-lg"
           style={{ imageRendering: "crisp-edges" }}
         />
       )}
@@ -301,7 +289,7 @@ function ImageView({
 
 function CodeView({ umlCode }: { umlCode: string }) {
   return (
-    <div className="h-full overflow-auto">
+    <div className="absolute inset-0 overflow-auto">
       <pre className="p-5 text-xs text-zinc-300 font-mono leading-relaxed whitespace-pre-wrap break-words">
         {umlCode}
       </pre>

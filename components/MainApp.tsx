@@ -8,7 +8,7 @@ import {
   Pulse,
 } from "@phosphor-icons/react";
 import InputPanel, { type UmlHint } from "./InputPanel";
-import PreviewPanel from "./PreviewPanel";
+import PreviewPanel, { type PreviewTab } from "./PreviewPanel";
 import HistoryList, { type HistoryItem } from "./HistoryList";
 
 export default function MainApp() {
@@ -19,6 +19,9 @@ export default function MainApp() {
   const [filename, setFilename] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Controlled tab state — lifted here so generation can switch to "code"
+  const [activeTab, setActiveTab] = useState<PreviewTab>("image");
 
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -46,8 +49,12 @@ export default function MainApp() {
 
     setIsGenerating(true);
     setError(null);
+    // Always switch to code tab immediately so user sees streamed output.
+    setActiveTab("code");
+    setUmlCode("");
+    setImageUrl("");
+    setFilename("");
 
-    // Build full prompt with optional type hint
     const promptPrefix =
       hint !== "auto"
         ? `请生成一个${
@@ -69,17 +76,69 @@ export default function MainApp() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error ?? "生成失败，请重试");
+        const text = await res.text();
+        try {
+          const err = JSON.parse(text);
+          throw new Error(err.error ?? "生成失败，请重试");
+        } catch {
+          throw new Error(text || "生成失败，请重试");
+        }
       }
 
-      const data = await res.json();
-      setUmlCode(data.umlCode);
-      setImageUrl(data.imageUrl);
-      setFilename(data.filename);
+      if (!res.body) throw new Error("响应体为空，无法流式读取");
 
-      // Refresh history if panel is open
-      if (showHistory) fetchHistory();
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        buffer = buffer.replace(/\r\n/g, "\n");
+
+        let idx: number;
+        while ((idx = buffer.indexOf("\n\n")) >= 0) {
+          const eventBlock = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+
+          if (!eventBlock.trim()) continue;
+
+          const lines = eventBlock
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean);
+
+          let eventType = "message";
+          const dataParts: string[] = [];
+
+          for (const line of lines) {
+            if (line.startsWith("event:")) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              dataParts.push(line.slice(5).trim());
+            }
+          }
+
+          const dataStr = dataParts.join("\n");
+          const payload = JSON.parse(dataStr || "{}") as any;
+
+          if (eventType === "token" && payload.chunk) {
+            setUmlCode((prev) => prev + payload.chunk);
+          } else if (eventType === "done") {
+            setUmlCode(payload.umlCode ?? "");
+            setImageUrl(payload.imageUrl ?? "");
+            setFilename(payload.filename ?? "");
+
+            if (showHistory) fetchHistory();
+            setIsGenerating(false);
+            return;
+          } else if (eventType === "error") {
+            throw new Error(payload.message ?? "生成失败，请重试");
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "未知错误");
     } finally {
@@ -93,12 +152,14 @@ export default function MainApp() {
     setFilename(item.filename);
     setDescription("");
     setError(null);
+    setActiveTab("code");
   };
 
   return (
-    <div className="min-h-[100dvh] flex flex-col">
+    // h-[100dvh] + overflow-hidden = no browser-level scroll ever
+    <div className="h-[100dvh] overflow-hidden flex flex-col">
       {/* ── Header ──────────────────────────────────────────── */}
-      <header className="sticky top-0 z-20 flex items-center justify-between px-4 lg:px-6 h-14 border-b border-zinc-800/80 bg-[#09090b]/90 backdrop-blur-md">
+      <header className="flex-shrink-0 flex items-center justify-between px-4 lg:px-6 h-14 border-b border-zinc-800/80 bg-[#09090b]/90 backdrop-blur-md z-10">
         <div className="flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
             <Pulse size={15} className="text-blue-400" weight="fill" />
@@ -138,9 +199,13 @@ export default function MainApp() {
       </header>
 
       {/* ── Main content ────────────────────────────────────── */}
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-0 max-w-[1600px] w-full mx-auto">
-        {/* Left: Input */}
-        <div className="lg:border-r border-zinc-800/70 p-4 lg:p-6 lg:min-h-[calc(100dvh-56px)]">
+      {/*
+        Desktop: overflow-hidden, each column fills height and scrolls internally.
+        Mobile: overflow-y-auto on the whole main area (single-column stacked layout).
+      */}
+      <main className="flex-1 min-h-0 overflow-y-auto lg:overflow-hidden grid grid-cols-1 lg:grid-cols-[420px_1fr]">
+        {/* Left: Input — scrolls internally on desktop */}
+        <div className="lg:h-full lg:overflow-y-auto lg:border-r border-zinc-800/70 p-4 lg:p-6">
           <InputPanel
             description={description}
             hint={hint}
@@ -152,29 +217,42 @@ export default function MainApp() {
           />
         </div>
 
-        {/* Divider on mobile */}
+        {/* Mobile divider */}
         <div className="lg:hidden h-px bg-zinc-800/70 mx-4" />
 
-        {/* Right: Preview */}
-        <div className="p-4 lg:p-6">
+        {/* Right: Preview — fills height, content scrolls inside */}
+        <div className="lg:h-full lg:overflow-hidden flex flex-col p-4 lg:p-6">
           <PreviewPanel
             umlCode={umlCode}
             imageUrl={imageUrl}
             filename={filename}
             isGenerating={isGenerating}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
           />
         </div>
       </main>
 
-      {/* ── History drawer ───────────────────────────────────── */}
+      {/* ── History: fixed overlay at the bottom ─────────────── */}
       <AnimatePresence>
         {showHistory && (
-          <HistoryList
-            items={history}
-            loading={loadingHistory}
-            onSelect={handleSelectHistory}
-            onClose={() => setShowHistory(false)}
-          />
+          <>
+            {/* Dim backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setShowHistory(false)}
+              className="fixed inset-0 z-30 bg-black/30"
+            />
+            <HistoryList
+              items={history}
+              loading={loadingHistory}
+              onSelect={handleSelectHistory}
+              onClose={() => setShowHistory(false)}
+            />
+          </>
         )}
       </AnimatePresence>
     </div>

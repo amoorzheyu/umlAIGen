@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
-import { generateUMLCode } from "@/lib/qwen";
+import { generateUMLCodeStream } from "@/lib/qwen";
 import { getPlantUMLPngUrl } from "@/lib/plantuml";
 
 function buildFilename(): string {
@@ -14,31 +14,75 @@ function buildFilename(): string {
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const description: string = body?.description ?? "";
+  const body = await req.json();
+  const description: string = body?.description ?? "";
 
-    if (!description.trim()) {
-      return NextResponse.json(
-        { error: "请输入 UML 描述内容" },
-        { status: 400 }
-      );
-    }
-
-    const umlCode = await generateUMLCode(description.trim());
-    const imageUrl = getPlantUMLPngUrl(umlCode);
-
-    // Persist .wsd file to <project-root>/output/
-    const outputDir = join(process.cwd(), "output");
-    await mkdir(outputDir, { recursive: true });
-    const filename = buildFilename();
-    await writeFile(join(outputDir, filename), umlCode, "utf-8");
-
-    return NextResponse.json({ umlCode, imageUrl, filename });
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "服务器内部错误";
-    console.error("[/api/generate]", err);
-    return NextResponse.json({ error: message }, { status: 500 });
+  if (!description.trim()) {
+    return NextResponse.json({ error: "请输入 UML 描述内容" }, { status: 400 });
   }
+
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        const safeDescription = description.trim();
+
+        controller.enqueue(
+          encoder.encode(
+            `event: started\ndata: ${JSON.stringify({})}\n\n`
+          )
+        );
+
+        const umlCode = await generateUMLCodeStream(
+          safeDescription,
+          (chunk) => {
+            controller.enqueue(
+              encoder.encode(
+                `event: token\ndata: ${JSON.stringify({ chunk })}\n\n`
+              )
+            );
+          },
+          req.signal
+        );
+
+        const imageUrl = getPlantUMLPngUrl(umlCode);
+
+        // Persist .wsd file to <project-root>/output/
+        const outputDir = join(process.cwd(), "output");
+        await mkdir(outputDir, { recursive: true });
+        const filename = buildFilename();
+        await writeFile(join(outputDir, filename), umlCode, "utf-8");
+
+        controller.enqueue(
+          encoder.encode(
+            `event: done\ndata: ${JSON.stringify({
+              umlCode,
+              imageUrl,
+              filename,
+            })}\n\n`
+          )
+        );
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "服务器内部错误";
+        console.error("[/api/generate]", err);
+        controller.enqueue(
+          encoder.encode(
+            `event: error\ndata: ${JSON.stringify({ message })}\n\n`
+          )
+        );
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new NextResponse(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform, max-age=0",
+      Connection: "keep-alive",
+    },
+  });
 }

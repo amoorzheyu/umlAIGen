@@ -30,7 +30,7 @@ export default function HistoryList({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 20 }}
       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-      className="border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-sm"
+      className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-800 bg-zinc-900/98 backdrop-blur-md shadow-2xl shadow-black/40"
     >
       <div className="max-w-[1600px] mx-auto px-4 lg:px-6 py-4">
         {/* Header */}
