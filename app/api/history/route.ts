@@ -4,6 +4,13 @@ import { join } from "path";
 import { existsSync } from "fs";
 import { getPlantUMLPngUrl } from "@/lib/plantuml";
 
+function shouldStoreOutput(): boolean {
+  const v = process.env.UMLAIGEN_STORE_OUTPUT;
+  if (!v) return false;
+  const normalized = v.trim().toLowerCase();
+  return ["true", "1", "yes", "on"].includes(normalized);
+}
+
 export interface HistoryItem {
   filename: string;
   createdAt: string;
@@ -29,6 +36,10 @@ function parseFilenameDate(filename: string): string {
 
 export async function GET() {
   try {
+    if (!shouldStoreOutput()) {
+      return NextResponse.json({ items: [] });
+    }
+
     const outputDir = join(process.cwd(), "output");
 
     if (!existsSync(outputDir)) {

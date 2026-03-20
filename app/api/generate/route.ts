@@ -4,6 +4,13 @@ import { join } from "path";
 import { generateUMLCodeStream } from "@/lib/qwen";
 import { getPlantUMLPngUrl } from "@/lib/plantuml";
 
+function shouldStoreOutput(): boolean {
+  const v = process.env.UMLAIGEN_STORE_OUTPUT;
+  if (!v) return false;
+  const normalized = v.trim().toLowerCase();
+  return ["true", "1", "yes", "on"].includes(normalized);
+}
+
 function buildFilename(): string {
   const now = new Date();
   const pad = (n: number, w = 2) => String(n).padStart(w, "0");
@@ -48,11 +55,15 @@ export async function POST(req: NextRequest) {
 
         const imageUrl = getPlantUMLPngUrl(umlCode);
 
-        // Persist .wsd file to <project-root>/output/
-        const outputDir = join(process.cwd(), "output");
-        await mkdir(outputDir, { recursive: true });
         const filename = buildFilename();
-        await writeFile(join(outputDir, filename), umlCode, "utf-8");
+        const storeOutput = shouldStoreOutput();
+
+        // Persist .wsd file to <project-root>/output/ (server-side optional)
+        if (storeOutput) {
+          const outputDir = join(process.cwd(), "output");
+          await mkdir(outputDir, { recursive: true });
+          await writeFile(join(outputDir, filename), umlCode, "utf-8");
+        }
 
         controller.enqueue(
           encoder.encode(
