@@ -18,6 +18,11 @@ export const metadata: Metadata = {
   title: "UML AI Generator",
   description:
     "通过自然语言描述，由 AI 驱动的 UML 图表生成工具",
+  icons: {
+    icon: "/favicon.svg",
+    apple: "/favicon.svg",
+    shortcut: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
