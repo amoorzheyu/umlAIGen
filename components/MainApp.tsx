@@ -396,9 +396,6 @@ export default function MainApp() {
           <span className="text-sm sm:text-base font-semibold tracking-tight">
             UML <span className="text-blue-400">AI</span> Generator
           </span>
-          <span className="hidden sm:inline-flex items-center justify-center text-[11px] font-mono text-zinc-500 border border-zinc-800 px-2 py-0.5 rounded-full">
-            uml-ai-gen
-          </span>
         </div>
 
         <div className="flex items-center gap-2">
