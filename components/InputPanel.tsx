@@ -117,20 +117,34 @@ export default function InputPanel({
     if (!items) return;
 
     const imageFiles: File[] = [];
+    const docFiles: File[] = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      if (item.kind === "file" && item.type.startsWith("image/")) {
-        const file = item.getAsFile();
-        if (file) imageFiles.push(file);
+      if (item.kind !== "file") continue;
+      const file = item.getAsFile();
+      if (!file) continue;
+      if (item.type.startsWith("image/") || isProbablyImage(file)) {
+        imageFiles.push(file);
+      } else {
+        docFiles.push(file);
       }
     }
 
-    if (imageFiles.length === 0) return;
+    const allFiles = imageFiles.length + docFiles.length;
+    if (allFiles === 0) return;
 
     e.preventDefault();
     setReferenceError(null);
 
+    const existingIds = new Set([
+      ...referenceImages.map((i) => i.id),
+      ...referenceFiles.map((f) => f.id),
+    ]);
+    const seenIds = new Set<string>();
+    let hasDuplicate = false;
+
     const nextImages: ReferenceImagePreview[] = [...referenceImages];
+    const nextFiles: ReferenceFilePreview[] = [...referenceFiles];
     let nextTotal = currentTotalBytes;
     const MAX_ITEMS = 20;
     let nextCount =
@@ -138,6 +152,12 @@ export default function InputPanel({
       referenceFiles.filter((f) => Boolean(f.file)).length;
 
     for (const f of imageFiles) {
+      const id = makeId(f);
+      if (existingIds.has(id) || seenIds.has(id)) {
+        hasDuplicate = true;
+        continue;
+      }
+      seenIds.add(id);
       if (nextTotal + f.size > TOTAL_MAX_BYTES) {
         setReferenceError("参考资料总大小超过 10MB 限制。");
         continue;
@@ -150,13 +170,12 @@ export default function InputPanel({
         setReferenceError("参考资料数量过多，请减少文件数。");
         continue;
       }
-
       nextTotal += f.size;
       nextCount += 1;
-
       const dataUrl = await fileToDataUrl(f);
+      existingIds.add(id);
       nextImages.push({
-        id: makeId(f),
+        id,
         filename: f.name,
         size: f.size,
         mimeType: guessImageMimeType(f.name, f.type),
@@ -165,8 +184,45 @@ export default function InputPanel({
       });
     }
 
-    if (nextImages.length > referenceImages.length) {
-      onReferenceChange(nextImages, referenceFiles);
+    for (const f of docFiles) {
+      const id = makeId(f);
+      if (existingIds.has(id) || seenIds.has(id)) {
+        hasDuplicate = true;
+        continue;
+      }
+      seenIds.add(id);
+      if (nextTotal + f.size > TOTAL_MAX_BYTES) {
+        setReferenceError("参考资料总大小超过 10MB 限制。");
+        continue;
+      }
+      if (f.size > FILE_MAX_BYTES) {
+        setReferenceError(`文件 ${f.name} 超过 5MB 限制。`);
+        continue;
+      }
+      if (nextCount + 1 > MAX_ITEMS) {
+        setReferenceError("参考资料数量过多，请减少文件数。");
+        continue;
+      }
+      nextTotal += f.size;
+      nextCount += 1;
+      existingIds.add(id);
+      nextFiles.push({
+        id,
+        filename: f.name,
+        size: f.size,
+        mimeType: f.type || "application/octet-stream",
+        file: f,
+      });
+    }
+
+    if (hasDuplicate) {
+      setReferenceError("已上传，请勿重复上传");
+    }
+    if (
+      nextImages.length > referenceImages.length ||
+      nextFiles.length > referenceFiles.length
+    ) {
+      onReferenceChange(nextImages, nextFiles);
     }
   };
 
