@@ -14,6 +14,7 @@ import {
   Stack,
   X,
   FileText,
+  Image as ImageIcon,
 } from "@phosphor-icons/react";
 
 export type UmlHint =
@@ -50,6 +51,90 @@ const HINT_OPTIONS: { value: UmlHint; label: string; icon: React.ReactNode }[] =
     { value: "usecase", label: "用例图", icon: <CirclesThree size={14} /> },
     { value: "state", label: "状态图", icon: <Stack size={14} /> },
   ];
+
+function parseMentionSegments(
+  text: string,
+  imageFilenames: string[],
+  fileFilenames: string[]
+): Array<{ text: string; isMention: boolean; type?: "image" | "file" }> {
+  if (!text) return [];
+  const imageSet = new Set(imageFilenames.map((f) => f.toLowerCase()));
+  const fileSet = new Set(fileFilenames.map((f) => f.toLowerCase()));
+  const regex = /@([^\s@\n]+)/g;
+  const segments: Array<{ text: string; isMention: boolean; type?: "image" | "file" }> = [];
+  let lastIndex = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const fullMatch = match[0];
+    const name = match[1];
+    const lower = name.toLowerCase();
+    const isImage = imageSet.has(lower);
+    const isFile = fileSet.has(lower);
+    if (isImage || isFile) {
+      segments.push({
+        text: text.slice(lastIndex, match.index),
+        isMention: false,
+      });
+      segments.push({
+        text: fullMatch,
+        isMention: true,
+        type: isImage ? "image" : "file",
+      });
+      lastIndex = match.index + fullMatch.length;
+    }
+  }
+  if (lastIndex < text.length) {
+    segments.push({ text: text.slice(lastIndex), isMention: false });
+  }
+  return segments.length > 0 ? segments : [{ text, isMention: false }];
+}
+
+function getMentionContext(
+  text: string,
+  caretIndex: number
+): { query: string; startIndex: number } | null {
+  const beforeCaret = text.slice(0, caretIndex);
+  const lastAt = beforeCaret.lastIndexOf("@");
+  if (lastAt < 0) return null;
+  const afterAt = beforeCaret.slice(lastAt + 1);
+  if (/[\s\n]/.test(afterAt)) return null;
+  return { query: afterAt, startIndex: lastAt };
+}
+
+function getMatchingReferences(
+  query: string,
+  images: { filename: string }[],
+  files: { filename: string }[],
+  limit: number
+): Array<{ filename: string; type: "image" | "file" }> {
+  const q = query.toLowerCase();
+  if (!q) {
+    const all = [
+      ...images.map((i) => ({ filename: i.filename, type: "image" as const })),
+      ...files.map((f) => ({ filename: f.filename, type: "file" as const })),
+    ];
+    return all.slice(0, limit);
+  }
+  const scored: Array<{ item: { filename: string; type: "image" | "file" }; score: number }> = [];
+  for (const i of images) {
+    const lower = i.filename.toLowerCase();
+    let score = 0;
+    if (lower === q) score = 100;
+    else if (lower.startsWith(q)) score = 90 - q.length;
+    else if (lower.includes(q)) score = 70 - lower.indexOf(q);
+    if (score > 0) scored.push({ item: { filename: i.filename, type: "image" }, score });
+  }
+  for (const f of files) {
+    const lower = f.filename.toLowerCase();
+    let score = 0;
+    if (lower === q) score = 100;
+    else if (lower.startsWith(q)) score = 90 - q.length;
+    else if (lower.includes(q)) score = 70 - lower.indexOf(q);
+    if (score > 0) scored.push({ item: { filename: f.filename, type: "file" }, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((s) => s.item);
+}
 
 const HINT_DESCRIPTION: Record<UmlHint, string> = {
   auto: "AI 根据描述自动选择最合适的图类型",
@@ -94,10 +179,19 @@ export default function InputPanel({
   onClearReferenceContext,
 }: InputPanelProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const referenceScrollRef = useRef<HTMLDivElement>(null);
   const referenceAreaRef = useRef<HTMLDivElement>(null);
   const [referenceError, setReferenceError] = useState<string | null>(null);
+  const [mentionSuggestions, setMentionSuggestions] = useState<
+    Array<{ filename: string; type: "image" | "file" }>
+  >([]);
+  const [mentionContext, setMentionContext] = useState<{
+    query: string;
+    startIndex: number;
+  } | null>(null);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
 
   useEffect(() => {
     const area = referenceAreaRef.current;
@@ -126,10 +220,84 @@ export default function InputPanel({
     el.style.height = `${Math.max(el.scrollHeight, 160)}px`;
   }, [description]);
 
+
+  const syncScroll = () => {
+    const ta = textareaRef.current;
+    const hl = highlightRef.current;
+    if (ta && hl) hl.scrollTop = ta.scrollTop;
+  };
+
+  const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    const start = e.target.selectionStart ?? e.target.selectionEnd ?? value.length;
+    onChange(value);
+
+    const ctx = getMentionContext(value, start);
+    if (ctx) {
+      const matches = getMatchingReferences(
+        ctx.query,
+        referenceImages,
+        referenceFiles,
+        3
+      );
+      setMentionContext(ctx);
+      setMentionSuggestions(matches);
+      setSelectedSuggestionIndex(0);
+    } else {
+      setMentionContext(null);
+      setMentionSuggestions([]);
+    }
+  };
+
+  const handleSelectMention = (filename: string) => {
+    if (!mentionContext) return;
+    const start = mentionContext.startIndex;
+    const queryLen = mentionContext.query.length;
+    const before = description.slice(0, start);
+    const after = description.slice(start + 1 + queryLen);
+    const next = `${before}@${filename} ${after}`;
+    onChange(next);
+    setMentionContext(null);
+    setMentionSuggestions([]);
+    const pos = start + filename.length + 2;
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(pos, pos);
+    });
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
       onGenerate();
+      return;
+    }
+    if (mentionSuggestions.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedSuggestionIndex((i) =>
+          i < mentionSuggestions.length - 1 ? i + 1 : 0
+        );
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedSuggestionIndex((i) =>
+          i > 0 ? i - 1 : mentionSuggestions.length - 1
+        );
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleSelectMention(mentionSuggestions[selectedSuggestionIndex].filename);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionContext(null);
+        setMentionSuggestions([]);
+        return;
+      }
     }
   };
 
@@ -382,22 +550,105 @@ export default function InputPanel({
         </h2>
       </div>
 
-      {/* Textarea */}
-      <div className="relative">
+      {/* Textarea with @mention highlight */}
+      <div className="relative bg-zinc-900 border border-zinc-700/60 rounded-xl focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500/50">
+        <div className="overflow-hidden rounded-xl">
+        <div
+          ref={highlightRef}
+          aria-hidden
+          className="absolute inset-0 overflow-auto px-4 py-3 text-sm font-sans leading-relaxed resize-none pointer-events-none whitespace-pre-wrap break-words text-zinc-100"
+          style={{ minHeight: 160 }}
+        >
+          {parseMentionSegments(
+            description,
+            referenceImages.map((i) => i.filename),
+            referenceFiles.map((f) => f.filename)
+          ).map((seg, i) =>
+            seg.isMention ? (
+              <span
+                key={i}
+                className={
+                  seg.type === "image"
+                    ? "text-blue-400 font-medium"
+                    : "text-amber-400/90 font-medium"
+                }
+              >
+                {seg.text}
+              </span>
+            ) : (
+              <span key={i}>{seg.text}</span>
+            )
+          )}
+        </div>
         <textarea
           ref={textareaRef}
           value={description}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={handleDescriptionChange}
+          onSelect={(e) => {
+            const ta = e.target as HTMLTextAreaElement;
+            const start = ta.selectionStart ?? ta.value.length;
+            const ctx = getMentionContext(description, start);
+            if (ctx) {
+              const matches = getMatchingReferences(
+                ctx.query,
+                referenceImages,
+                referenceFiles,
+                3
+              );
+              setMentionContext(ctx);
+              setMentionSuggestions(matches);
+            } else {
+              setMentionContext(null);
+              setMentionSuggestions([]);
+            }
+          }}
+          onScroll={syncScroll}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           disabled={isGenerating}
-          placeholder={`用自然语言描述 UML 图表的内容…\n\n• 引用资源（图片、文档）可在此处直接粘贴\n• 例如：用户登录时序图、电商订单状态机、微服务架构类图\n• 支持 Ctrl+Enter 快捷生成`}
-          className="w-full min-h-[160px] bg-zinc-900 border border-zinc-700/60 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500/50 transition-all duration-200 font-sans resize-y disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
+          placeholder={`用自然语言描述 UML 图表的内容…\n\n• 引用资源（图片、文档）可在此处直接粘贴\n• 支持 @文件名 引用，如 @diagram.png\n• 支持 Ctrl+Enter 快捷生成`}
+          className="relative z-10 w-full min-h-[160px] bg-transparent border-0 px-4 py-3 text-sm text-transparent placeholder:text-zinc-600 focus:outline-none rounded-xl transition-all duration-200 font-sans resize-y disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed caret-zinc-100"
           style={{ minHeight: 160 }}
         />
-        <div className="absolute bottom-3 right-3 text-xs text-zinc-600 font-mono select-none">
+        <div className="absolute bottom-3 right-3 z-10 text-xs text-zinc-600 font-mono select-none pointer-events-none">
           {description.length}
         </div>
+        </div>
+
+        {mentionSuggestions.length > 0 && (
+          <div className="absolute left-4 right-4 top-full mt-1 z-20 flex flex-col gap-0.5 py-1.5 px-1 rounded-lg border border-zinc-700/60 bg-zinc-800/95 backdrop-blur-sm shadow-xl">
+            {mentionSuggestions.map((item, i) => (
+              <button
+                key={`${item.type}-${item.filename}-${i}`}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  handleSelectMention(item.filename);
+                }}
+                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md text-left text-sm transition-colors ${
+                  i === selectedSuggestionIndex
+                    ? "bg-zinc-700/80 text-zinc-100"
+                    : "text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200"
+                }`}
+              >
+                {item.type === "image" ? (
+                  <ImageIcon
+                    size={14}
+                    className="text-blue-400 shrink-0"
+                    weight="duotone"
+                  />
+                ) : (
+                  <FileText
+                    size={14}
+                    className="text-amber-400/90 shrink-0"
+                    weight="duotone"
+                  />
+                )}
+                <span className="font-mono truncate">{item.filename}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Hint type selector */}
