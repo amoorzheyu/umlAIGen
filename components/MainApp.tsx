@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ClockCounterClockwise,
   GithubLogo,
+  Wrench,
 } from "@phosphor-icons/react";
 import InputPanel, {
   type UmlHint,
@@ -44,6 +45,7 @@ export default function MainApp() {
 
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [syntaxFixInProgress, setSyntaxFixInProgress] = useState(0);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historySource, setHistorySource] = useState<"idb" | "api">("idb");
   const previewSectionRef = useRef<HTMLDivElement>(null);
@@ -277,9 +279,146 @@ export default function MainApp() {
                   dataUrl?: string;
                   size?: number;
                 };
-                // 有 dataUrl 即视为成功（含后端返回 400 但携带有效 PNG base64 的情况）
                 downloadedDataUrl = base64Payload?.dataUrl ?? null;
-                if (downloadedDataUrl) {
+
+                if (base64Res.status === 400 && downloadedDataUrl) {
+                  // 400 表示 PlantUML 语法错误，自动调用修复；修复后若仍 400 则继续重复修复
+                  setSyntaxFixInProgress(1);
+                  setUmlCode("");
+                  setActiveTab("code");
+                  const MAX_FIX_ATTEMPTS = 5;
+                  let currentUmlCode = nextUmlCode;
+                  let currentErrorDataUrl = downloadedDataUrl;
+                  let lastFixedCode = "";
+                  let lastRemoteImageUrl = "";
+                  let success = false;
+                  try {
+                    for (let attempt = 0; attempt < MAX_FIX_ATTEMPTS; attempt++) {
+                      setSyntaxFixInProgress(attempt + 1);
+                      const fixRes = await fetch("/api/fix-uml", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          umlCode: currentUmlCode,
+                          imageDataUrl: currentErrorDataUrl,
+                        }),
+                      });
+                      if (!fixRes.ok) {
+                        const fixErr = (await fixRes.json()) as { error?: string };
+                        throw new Error(fixErr?.error ?? "修复失败");
+                      }
+                      const fixPayload = (await fixRes.json()) as {
+                        umlCode?: string;
+                        imageUrl?: string;
+                      };
+                      const fixedCode = fixPayload.umlCode ?? "";
+                      const newRemoteImageUrl = fixPayload.imageUrl ?? "";
+                      if (!fixedCode || !newRemoteImageUrl) throw new Error("修复结果无效");
+
+                      setUmlCode("");
+                      await new Promise<void>((resolve) => {
+                        let i = 0;
+                        const CHUNK = 8;
+                        const tick = () => {
+                          if (i >= fixedCode.length) {
+                            resolve();
+                            return;
+                          }
+                          const end = Math.min(i + CHUNK, fixedCode.length);
+                          const chunk = fixedCode.slice(i, end);
+                          i = end;
+                          setUmlCode((prev) => prev + chunk);
+                          setTimeout(tick, 14);
+                        };
+                        tick();
+                      });
+
+                      const base64Res2 = await fetch("/api/image-base64", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ imageUrl: newRemoteImageUrl }),
+                      });
+                      const base64Payload2 = (await base64Res2.json()) as {
+                        dataUrl?: string;
+                        size?: number;
+                      };
+                      const newDataUrl = base64Payload2?.dataUrl ?? null;
+
+                      if (base64Res2.status === 400 && newDataUrl) {
+                        currentUmlCode = fixedCode;
+                        currentErrorDataUrl = newDataUrl;
+                        lastFixedCode = fixedCode;
+                        lastRemoteImageUrl = newRemoteImageUrl;
+                        continue;
+                      }
+                      if (newDataUrl) {
+                        setImageUrl(newDataUrl);
+                        await putUmlAIGenEntry({
+                          filename: nextFilename,
+                          askedAt,
+                          question: askedQuestion,
+                          graphType: askedGraphType,
+                          umlCode: fixedCode,
+                          remoteImageUrl: newRemoteImageUrl,
+                          imageDataUrl: newDataUrl,
+                          size: base64Payload2.size ?? 0,
+                          referenceContextText: nextReferenceContextText,
+                          referenceImages: referenceImages.map((i) => ({
+                            filename: i.filename,
+                            mimeType: i.mimeType,
+                            dataUrl: i.dataUrl,
+                            size: i.size,
+                          })),
+                          referenceFiles: referenceFiles.map((f) => ({
+                            filename: f.filename,
+                            mimeType: f.mimeType,
+                            size: f.size,
+                          })),
+                        });
+                        success = true;
+                        break;
+                      }
+                      setImageUrl(newRemoteImageUrl);
+                      break;
+                    }
+                    if (!success && lastFixedCode) {
+                      setImageUrl(currentErrorDataUrl);
+                      setUmlCode(lastFixedCode);
+                      setError("修复多次后仍有语法错误，已保留最后尝试的结果");
+                    }
+                    setActiveTab("image");
+                  } catch (fixErr) {
+                    setImageUrl(downloadedDataUrl);
+                    await putUmlAIGenEntry({
+                      filename: nextFilename,
+                      askedAt,
+                      question: askedQuestion,
+                      graphType: askedGraphType,
+                      umlCode: nextUmlCode,
+                      remoteImageUrl: nextRemoteImageUrl,
+                      imageDataUrl: downloadedDataUrl,
+                      size: base64Payload.size ?? 0,
+                      referenceContextText: nextReferenceContextText,
+                      referenceImages: referenceImages.map((i) => ({
+                        filename: i.filename,
+                        mimeType: i.mimeType,
+                        dataUrl: i.dataUrl,
+                        size: i.size,
+                      })),
+                      referenceFiles: referenceFiles.map((f) => ({
+                        filename: f.filename,
+                        mimeType: f.mimeType,
+                        size: f.size,
+                      })),
+                    });
+                    setActiveTab("image");
+                    setError(
+                      fixErr instanceof Error ? fixErr.message : "自动修复失败，已保留原错误截图"
+                    );
+                  } finally {
+                    setSyntaxFixInProgress(0);
+                  }
+                } else if (downloadedDataUrl) {
                   setImageUrl(downloadedDataUrl);
                   await putUmlAIGenEntry({
                     filename: nextFilename,
@@ -303,16 +442,17 @@ export default function MainApp() {
                       size: f.size,
                     })),
                   });
+                  setActiveTab("image");
+                } else {
+                  setImageUrl(nextRemoteImageUrl);
+                  setError("图片未能保存到本地，当前为远程链接展示");
+                  setActiveTab("image");
                 }
               } catch {
-                // 下载失败时再退回到远程链接展示
-              }
-              if (!downloadedDataUrl) {
                 setImageUrl(nextRemoteImageUrl);
                 setError("图片未能保存到本地，当前为远程链接展示");
+                setActiveTab("image");
               }
-              // 图片就绪后再切换到预览 tab，避免空 imageUrl 导致裂图
-              setActiveTab("image");
             } else {
               // 无图片时保持在代码 tab
               setActiveTab("code");
@@ -513,6 +653,26 @@ export default function MainApp() {
           />
         </div>
       </main>
+
+      {/* ── 语法错误自动修复中提示（无蒙版）──────────────────── */}
+      <AnimatePresence>
+        {syntaxFixInProgress > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl bg-zinc-800/95 border border-zinc-600/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] px-4 py-2.5 text-sm text-zinc-200"
+          >
+            <span className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
+            <Wrench size={16} className="text-amber-400/90 shrink-0" weight="bold" />
+            <span>
+              检测到语法错误，正在修复中…
+              {syntaxFixInProgress >= 2 && ` x${syntaxFixInProgress}`}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── History: fixed overlay at the bottom ─────────────── */}
       <AnimatePresence>

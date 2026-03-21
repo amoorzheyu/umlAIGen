@@ -338,7 +338,7 @@ export async function extractContextFromImage(params: {
         role: "user",
         content: [
           { type: "text", text: userText },
-          { type: "image_url", image_url: { url: dataUrl } },
+          { type: "image_url", image_url: { url: dataUrl, detail: "auto" } },
         ],
       },
     ],
@@ -373,13 +373,7 @@ const FIX_UML_SYSTEM_PROMPT = `你是 PlantUML 语法修复助手。
 
 你必须：
 1. 根据图片中的报错内容，定位并修复语法错误；
-2. 仅做最小修改，尽可能不改变原有逻辑与结构；
-3. 严格遵循 PlantUML 1.2026 语法，使用半角标点（分号用 ; 不是 ；）。
-
-输出规则（必须遵守）：
-1. 只输出修复后的纯 PlantUML 代码，禁止解释、标题、Markdown、代码块标记；
-2. 代码必须严格以单独一行的 @startuml 开始，以单独一行的 @enduml 结束；
-3. 不得输出 @startuml 之前或 @enduml 之后的任何内容。`;
+2. 仅做最小修改，尽可能不改变原有逻辑与结构；`;
 
 export async function fixUMLFromErrorImage(params: {
   umlCode: string;
@@ -393,7 +387,7 @@ export async function fixUMLFromErrorImage(params: {
       type: "text",
       text: `以下 PlantUML 源码渲染失败，请根据附带的错误截图修复语法错误。仅修复错误，尽量不改变原逻辑。\n\n当前源码：\n\`\`\`\n${umlCode}\n\`\`\``,
     },
-    { type: "image_url", image_url: { url: imageDataUrl } },
+    { type: "image_url", image_url: { url: imageDataUrl, detail: "auto" } },
   ];
 
   const url = getChatUrl();
