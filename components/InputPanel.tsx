@@ -111,6 +111,65 @@ export default function InputPanel({
     }
   };
 
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (isGenerating) return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+
+    if (imageFiles.length === 0) return;
+
+    e.preventDefault();
+    setReferenceError(null);
+
+    const nextImages: ReferenceImagePreview[] = [...referenceImages];
+    let nextTotal = currentTotalBytes;
+    const MAX_ITEMS = 20;
+    let nextCount =
+      referenceImages.filter((i) => Boolean(i.file)).length +
+      referenceFiles.filter((f) => Boolean(f.file)).length;
+
+    for (const f of imageFiles) {
+      if (nextTotal + f.size > TOTAL_MAX_BYTES) {
+        setReferenceError("参考资料总大小超过 10MB 限制。");
+        continue;
+      }
+      if (f.size > IMAGE_MAX_BYTES) {
+        setReferenceError(`图片 ${f.name} 超过 5MB 限制。`);
+        continue;
+      }
+      if (nextCount + 1 > MAX_ITEMS) {
+        setReferenceError("参考资料数量过多，请减少文件数。");
+        continue;
+      }
+
+      nextTotal += f.size;
+      nextCount += 1;
+
+      const dataUrl = await fileToDataUrl(f);
+      nextImages.push({
+        id: makeId(f),
+        filename: f.name,
+        size: f.size,
+        mimeType: guessImageMimeType(f.name, f.type),
+        dataUrl,
+        file: f,
+      });
+    }
+
+    if (nextImages.length > referenceImages.length) {
+      onReferenceChange(nextImages, referenceFiles);
+    }
+  };
+
   const canSubmit = description.trim().length > 0 && !isGenerating;
 
   const IMAGE_MAX_BYTES = 5_000_000;
@@ -252,8 +311,9 @@ export default function InputPanel({
           value={description}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           disabled={isGenerating}
-          placeholder={`用自然语言描述 UML 图表的内容…\n\n例如：\n  • 用户登录系统的时序图，包含前端、后端和数据库\n  • 电商平台的订单状态机，包含待支付、已支付、发货中等状态\n  • 微服务架构的类图，包含用户服务、订单服务和商品服务`}
+          placeholder={`用自然语言描述 UML 图表的内容…\n\n• 引用资源（图片、文档）可在此处直接粘贴\n• 例如：用户登录时序图、电商订单状态机、微服务架构类图\n• 支持 Ctrl+Enter 快捷生成`}
           className="w-full min-h-[160px] bg-zinc-900 border border-zinc-700/60 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500/50 transition-all duration-200 font-sans resize-y disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
           style={{ minHeight: 160 }}
         />
