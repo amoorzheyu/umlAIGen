@@ -73,6 +73,21 @@ export default function PreviewPanel({
     a.click();
   };
 
+  // data URL 无法用 target="_blank" 直接打开（浏览器安全策略），需写入新窗口
+  const handleOpenInNewWindow = () => {
+    if (!imageUrl) return;
+    if (imageUrl.startsWith("data:")) {
+      const w = window.open("", "_blank");
+      if (w) {
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#18181b"><img src="${imageUrl}" alt="UML diagram" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>`;
+        w.document.write(html);
+        w.document.close();
+      }
+    } else {
+      window.open(imageUrl, "_blank", "noopener,noreferrer");
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 12 }}
@@ -129,15 +144,12 @@ export default function PreviewPanel({
                 <ActionButton onClick={handleDownloadImage} title="下载图片">
                   <DownloadSimple size={14} />
                 </ActionButton>
-                <a
-                  href={imageUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <ActionButton
+                  onClick={handleOpenInNewWindow}
                   title="在新窗口打开"
-                  className="flex items-center justify-center w-8 h-8 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-all duration-150"
                 >
                   <ArrowSquareOut size={14} />
-                </a>
+                </ActionButton>
               </>
             )}
           </motion.div>
@@ -167,6 +179,7 @@ export default function PreviewPanel({
                   onError={() => setImgError(true)}
                   onLoad={() => setImgError(false)}
                   onPreview={() => setPreviewOpen(true)}
+                  onOpenInNewWindow={handleOpenInNewWindow}
                 />
               ) : (
                 <CodeView umlCode={umlCode} />
@@ -271,12 +284,14 @@ function ImageView({
   onError,
   onLoad,
   onPreview,
+  onOpenInNewWindow,
 }: {
   imageUrl: string;
   imgError: boolean;
   onError: () => void;
   onLoad: () => void;
   onPreview: () => void;
+  onOpenInNewWindow?: () => void;
 }) {
   return (
     <div className="absolute inset-0 flex items-center justify-center p-4 overflow-auto">
@@ -288,15 +303,18 @@ function ImageView({
             <br />
             请切换至「PlantUML 代码」标签检查内容。
           </p>
-          <a
-            href={imageUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 mt-2"
-          >
-            直接访问 PlantUML 链接
-            <ArrowSquareOut size={12} />
-          </a>
+          {imageUrl && onOpenInNewWindow && (
+            <button
+              type="button"
+              onClick={onOpenInNewWindow}
+              className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 mt-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 rounded"
+            >
+              {imageUrl.startsWith("data:")
+                ? "在新窗口打开"
+                : "直接访问 PlantUML 链接"}
+              <ArrowSquareOut size={12} />
+            </button>
+          )}
         </div>
       ) : (
         <motion.button
