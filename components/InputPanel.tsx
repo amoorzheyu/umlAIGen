@@ -95,7 +95,20 @@ export default function InputPanel({
 }: InputPanelProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const referenceScrollRef = useRef<HTMLDivElement>(null);
   const [referenceError, setReferenceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const el = referenceScrollRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, []);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -482,7 +495,10 @@ export default function InputPanel({
             onChange={(e) => void handleAddUploads(e.target.files)}
           />
 
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          <div
+            ref={referenceScrollRef}
+            className="flex gap-2 overflow-x-auto pb-1"
+          >
             <button
               type="button"
               onClick={() => uploadInputRef.current?.click()}
