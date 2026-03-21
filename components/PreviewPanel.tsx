@@ -33,7 +33,8 @@ export default function PreviewPanel({
   activeTab,
   onTabChange,
 }: PreviewPanelProps) {
-  const [copied, setCopied] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [imageCopied, setImageCopied] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
 
@@ -48,8 +49,8 @@ export default function PreviewPanel({
   const handleCopy = async () => {
     if (!umlCode) return;
     await navigator.clipboard.writeText(umlCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
   };
 
   const handleDownloadCode = () => {
@@ -88,6 +89,40 @@ export default function PreviewPanel({
     }
   };
 
+  const handleCopyImage = async () => {
+    if (!imageUrl) return;
+    try {
+      const img = new Image();
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            reject(new Error("Canvas context unavailable"));
+            return;
+          }
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob(
+            (b) => (b ? resolve(b) : reject(new Error("toBlob failed"))),
+            "image/png"
+          );
+        };
+        img.onerror = () => reject(new Error("Image load failed"));
+        img.crossOrigin = imageUrl.startsWith("data:") ? "" : "anonymous";
+        img.src = imageUrl;
+      });
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": blob }),
+      ]);
+      setImageCopied(true);
+      setTimeout(() => setImageCopied(false), 2000);
+    } catch {
+      // 复制失败静默忽略
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 12 }}
@@ -122,8 +157,8 @@ export default function PreviewPanel({
           >
             {activeTab === "code" ? (
               <>
-                <ActionButton onClick={handleCopy} title="复制代码" active={copied}>
-                  {copied ? (
+                <ActionButton onClick={handleCopy} title="复制代码" active={codeCopied}>
+                  {codeCopied ? (
                     <Check size={14} className="text-green-400" />
                   ) : (
                     <Copy size={14} />
@@ -140,6 +175,13 @@ export default function PreviewPanel({
                   title="放大预览"
                 >
                   <MagnifyingGlassPlus size={14} weight="bold" />
+                </ActionButton>
+                <ActionButton onClick={handleCopyImage} title="复制图片" active={imageCopied}>
+                  {imageCopied ? (
+                    <Check size={14} className="text-green-400" />
+                  ) : (
+                    <Copy size={14} />
+                  )}
                 </ActionButton>
                 <ActionButton onClick={handleDownloadImage} title="下载图片">
                   <DownloadSimple size={14} />
@@ -196,6 +238,22 @@ export default function PreviewPanel({
           onClose={() => setPreviewOpen(false)}
         />
       )}
+
+      {/* 复制成功提示 */}
+      <AnimatePresence>
+        {(codeCopied || imageCopied) && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 rounded-xl bg-zinc-800/95 border border-zinc-600/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] px-4 py-2.5 text-sm text-zinc-200"
+          >
+            <Check size={16} weight="bold" className="text-emerald-400 flex-shrink-0" />
+            <span>已复制到剪贴板</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Filename badge */}
       {filename && !isGenerating && (

@@ -2,7 +2,7 @@
 
 import { useEffect, useCallback, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X } from "@phosphor-icons/react";
+import { X, Copy, Check } from "@phosphor-icons/react";
 
 interface ImagePreviewModalProps {
   isOpen: boolean;
@@ -27,6 +27,8 @@ export default function ImagePreviewModal({
 }: ImagePreviewModalProps) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
   const didDragRef = useRef(false);
@@ -95,6 +97,8 @@ export default function ImagePreviewModal({
     if (!isOpen) return;
     setZoom(1);
     setPan({ x: 0, y: 0 });
+    setCopied(false);
+    setCopyError(null);
     document.addEventListener("keydown", handleKeyDown);
     document.body.style.overflow = "hidden";
     return () => {
@@ -102,6 +106,40 @@ export default function ImagePreviewModal({
       document.body.style.overflow = "";
     };
   }, [isOpen, handleKeyDown]);
+
+  const handleCopyImage = useCallback(async () => {
+    try {
+      setCopyError(null);
+      const img = new Image();
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            reject(new Error("Canvas context unavailable"));
+            return;
+          }
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob(
+            (b) => (b ? resolve(b) : reject(new Error("toBlob failed"))),
+            "image/png"
+          );
+        };
+        img.onerror = () => reject(new Error("Image load failed"));
+        img.crossOrigin = imageUrl.startsWith("data:") ? "" : "anonymous";
+        img.src = imageUrl;
+      });
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": blob }),
+      ]);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setCopyError("复制失败");
+    }
+  }, [imageUrl]);
 
   return (
     <AnimatePresence>
@@ -148,19 +186,58 @@ export default function ImagePreviewModal({
             </motion.div>
           </div>
 
-          <motion.button
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.98 }}
-            transition={springTransition}
-            className="absolute top-4 right-4 w-10 h-10 rounded-xl bg-zinc-800/90 border border-zinc-700/60 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700/90 flex items-center justify-center shadow-lg"
-            aria-label="关闭预览"
-          >
-            <X size={18} weight="bold" />
-          </motion.button>
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            <motion.button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCopyImage();
+              }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.98 }}
+              transition={springTransition}
+              className="w-10 h-10 rounded-xl bg-zinc-800/90 border border-zinc-700/60 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700/90 flex items-center justify-center shadow-lg"
+              aria-label="复制图片"
+              title={copied ? "已复制" : "复制图片"}
+            >
+              {copied ? (
+                <Check size={18} weight="bold" className="text-emerald-400" />
+              ) : (
+                <Copy size={18} weight="bold" />
+              )}
+            </motion.button>
+            <motion.button
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.98 }}
+              transition={springTransition}
+              className="w-10 h-10 rounded-xl bg-zinc-800/90 border border-zinc-700/60 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700/90 flex items-center justify-center shadow-lg"
+              aria-label="关闭预览"
+            >
+              <X size={18} weight="bold" />
+            </motion.button>
+          </div>
+          {copyError && (
+            <p className="absolute top-16 right-4 text-xs text-red-400 bg-zinc-900/90 px-2 py-1 rounded-lg border border-red-500/30">
+              {copyError}
+            </p>
+          )}
+          <AnimatePresence>
+            {copied && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-xl bg-zinc-800/95 border border-zinc-600/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] px-4 py-2.5 text-sm text-zinc-200"
+              >
+                <Check size={16} weight="bold" className="text-emerald-400 flex-shrink-0" />
+                <span>已复制到剪贴板</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       )}
     </AnimatePresence>
