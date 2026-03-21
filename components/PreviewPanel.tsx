@@ -93,7 +93,7 @@ export default function PreviewPanel({
       initial={{ opacity: 0, x: 12 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1], delay: 0.05 }}
-      className="h-full flex flex-col gap-3"
+      className="h-full min-h-[200px] flex flex-col gap-3"
     >
       {/* Tabs + actions */}
       <div className="flex items-center justify-between flex-shrink-0">
@@ -156,8 +156,8 @@ export default function PreviewPanel({
         )}
       </div>
 
-      {/* Content area — fills remaining height, scrolls internally */}
-      <div className="flex-1 min-h-0 bg-zinc-900 border border-zinc-700/60 rounded-xl overflow-hidden relative">
+      {/* Content area — fills remaining height, scrolls internally; min-h on mobile for visibility */}
+      <div className="flex-1 min-h-[160px] lg:min-h-0 bg-zinc-900 border border-zinc-700/60 rounded-xl overflow-hidden relative">
         <AnimatePresence mode="wait">
           {shouldShowSkeleton ? (
             <LoadingSkeleton key="loading" />

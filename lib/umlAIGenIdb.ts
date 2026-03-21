@@ -118,3 +118,27 @@ export async function listUmlAIGenEntries(
   });
 }
 
+export async function deleteUmlAIGenEntry(filename: string): Promise<void> {
+  const db = await openDb();
+
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.delete(filename);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function clearUmlAIGenEntries(): Promise<void> {
+  const db = await openDb();
+
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+

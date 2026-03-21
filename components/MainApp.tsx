@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ClockCounterClockwise,
@@ -17,6 +17,8 @@ import {
   getUmlAIGenEntry,
   listUmlAIGenEntries,
   putUmlAIGenEntry,
+  deleteUmlAIGenEntry,
+  clearUmlAIGenEntries,
 } from "@/lib/umlAIGenIdb";
 
 export default function MainApp() {
@@ -43,6 +45,8 @@ export default function MainApp() {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historySource, setHistorySource] = useState<"idb" | "api">("idb");
+  const previewSectionRef = useRef<HTMLDivElement>(null);
 
   const fetchHistory = useCallback(async () => {
     setLoadingHistory(true);
@@ -55,6 +59,7 @@ export default function MainApp() {
         cached = [];
       }
       if (cached.length > 0) {
+        setHistorySource("idb");
         setHistory(
           cached.map((c) => ({
             filename: c.filename,
@@ -74,6 +79,7 @@ export default function MainApp() {
       }
 
       // 没有本地缓存时，才读取后端备份（并在点击条目后补做 base64 缓存）
+      setHistorySource("api");
       const res = await fetch("/api/history");
       const data = await res.json();
       setHistory((data.items ?? []) as HistoryItem[]);
@@ -83,6 +89,27 @@ export default function MainApp() {
       setLoadingHistory(false);
     }
   }, []);
+
+  const handleDeleteHistory = useCallback(
+    async (item: HistoryItem) => {
+      try {
+        await deleteUmlAIGenEntry(item.filename);
+        await fetchHistory();
+      } catch {
+        // silent
+      }
+    },
+    [fetchHistory]
+  );
+
+  const handleDeleteAllHistory = useCallback(async () => {
+    try {
+      await clearUmlAIGenEntries();
+      await fetchHistory();
+    } catch {
+      // silent
+    }
+  }, [fetchHistory]);
 
   useEffect(() => {
     if (showHistory) fetchHistory();
@@ -121,6 +148,20 @@ export default function MainApp() {
     setUmlCode("");
     setImageUrl("");
     setFilename("");
+
+    // 移动端：一开始生成就滚动到预览区域，让用户能看到代码流式输出
+    setTimeout(() => {
+      if (
+        typeof window !== "undefined" &&
+        window.innerWidth < 1024 &&
+        previewSectionRef.current
+      ) {
+        previewSectionRef.current.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }
+    }, 100);
 
     const promptPrefix =
       hint !== "auto"
@@ -451,8 +492,11 @@ export default function MainApp() {
         {/* Mobile divider */}
         <div className="lg:hidden h-px bg-zinc-800/70 mx-4" />
 
-        {/* Right: Preview — fills height, content scrolls inside */}
-        <div className="lg:h-full lg:overflow-hidden flex flex-col p-4 lg:p-6">
+        {/* Right: Preview — fills height on desktop; min-h on mobile so content is visible */}
+        <div
+          ref={previewSectionRef}
+          className="min-h-[50dvh] lg:min-h-0 lg:h-full lg:overflow-hidden flex flex-col p-4 lg:p-6"
+        >
           <PreviewPanel
             umlCode={umlCode}
             imageUrl={imageUrl}
@@ -482,6 +526,9 @@ export default function MainApp() {
               loading={loadingHistory}
               onSelect={handleSelectHistory}
               onClose={() => setShowHistory(false)}
+              canDelete={historySource === "idb"}
+              onDelete={handleDeleteHistory}
+              onDeleteAll={handleDeleteAllHistory}
             />
           </>
         )}
