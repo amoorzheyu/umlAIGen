@@ -96,13 +96,13 @@ export default function InputPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const referenceScrollRef = useRef<HTMLDivElement>(null);
-  const referenceScrollWrapperRef = useRef<HTMLDivElement>(null);
+  const referenceAreaRef = useRef<HTMLDivElement>(null);
   const [referenceError, setReferenceError] = useState<string | null>(null);
 
   useEffect(() => {
-    const wrapper = referenceScrollWrapperRef.current;
+    const area = referenceAreaRef.current;
     const scrollEl = referenceScrollRef.current;
-    if (!wrapper || !scrollEl) return;
+    if (!area || !scrollEl) return;
     const handler = (e: WheelEvent) => {
       const delta = Math.abs(e.deltaX) > 0 ? e.deltaX : e.deltaY;
       if (Math.abs(delta) < 1) return;
@@ -112,12 +112,11 @@ export default function InputPanel({
       e.stopPropagation();
       scrollEl.scrollLeft += delta;
     };
-    wrapper.addEventListener("wheel", handler, {
+    area.addEventListener("wheel", handler, {
       passive: false,
       capture: true,
     });
-    return () =>
-      wrapper.removeEventListener("wheel", handler, { capture: true });
+    return () => area.removeEventListener("wheel", handler, { capture: true });
   }, []);
 
   useEffect(() => {
@@ -465,7 +464,7 @@ export default function InputPanel({
       </motion.button>
 
       {/* Reference uploader */}
-      <div className="flex flex-col gap-3 pt-1">
+      <div ref={referenceAreaRef} className="flex flex-col gap-3 pt-1">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <FileText size={16} className="text-zinc-400" />
@@ -493,10 +492,7 @@ export default function InputPanel({
         ) : null}
 
         {/* Mixed uploader */}
-        <div
-          ref={referenceScrollWrapperRef}
-          className="flex flex-col gap-2"
-        >
+        <div className="flex flex-col gap-2">
           <p className="text-[11px] text-zinc-600 font-medium">
             图片/文件参考（后端按后缀自动识别）
           </p>
@@ -510,7 +506,7 @@ export default function InputPanel({
 
           <div
             ref={referenceScrollRef}
-            className="flex gap-2 overflow-x-scroll overflow-y-hidden pb-1"
+            className="flex gap-2 overflow-x-scroll overflow-y-hidden pb-1 min-w-0"
           >
             <button
               type="button"

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Clock, File } from "@phosphor-icons/react";
 import type { UmlHint } from "./InputPanel";
@@ -44,6 +45,30 @@ export default function HistoryList({
   onSelect,
   onClose,
 }: HistoryListProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    const scrollEl = scrollRef.current;
+    if (!wrapper || !scrollEl) return;
+    const handler = (e: WheelEvent) => {
+      const delta = Math.abs(e.deltaX) > 0 ? e.deltaX : e.deltaY;
+      if (Math.abs(delta) < 1) return;
+      const maxScroll = scrollEl.scrollWidth - scrollEl.clientWidth;
+      if (maxScroll <= 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      scrollEl.scrollLeft += delta;
+    };
+    wrapper.addEventListener("wheel", handler, {
+      passive: false,
+      capture: true,
+    });
+    return () =>
+      wrapper.removeEventListener("wheel", handler, { capture: true });
+  }, []);
+
   const graphTypeLabel: Record<UmlHint, string> = {
     auto: "自动判断",
     sequence: "时序图",
@@ -61,7 +86,10 @@ export default function HistoryList({
       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-800 bg-zinc-900/98 backdrop-blur-md shadow-2xl shadow-black/40"
     >
-      <div className="max-w-[1600px] mx-auto px-4 lg:px-6 py-4">
+      <div
+        ref={wrapperRef}
+        className="max-w-[1600px] mx-auto px-4 lg:px-6 py-4"
+      >
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -83,7 +111,10 @@ export default function HistoryList({
 
         {/* Content */}
         {loading ? (
-          <div className="flex gap-3 overflow-x-auto pb-2">
+          <div
+            ref={scrollRef}
+            className="flex gap-3 overflow-x-scroll overflow-y-hidden pb-2"
+          >
             {Array.from({ length: 5 }).map((_, i) => (
               <div
                 key={i}
@@ -97,7 +128,10 @@ export default function HistoryList({
             <p className="text-xs text-zinc-600">还没有生成记录</p>
           </div>
         ) : (
-          <div className="flex gap-3 overflow-x-auto pb-2">
+          <div
+            ref={scrollRef}
+            className="flex gap-3 overflow-x-scroll overflow-y-hidden pb-2"
+          >
             <AnimatePresence>
               {items.map((item, idx) => (
                 <motion.button
