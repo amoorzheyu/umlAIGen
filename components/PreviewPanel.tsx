@@ -352,55 +352,61 @@ function ImageView({
   onOpenInNewWindow?: () => void;
 }) {
   return (
-    <div className="absolute inset-0 flex items-center justify-center p-4 overflow-auto">
+    <div className="absolute inset-0 overflow-auto overscroll-contain p-4 min-h-0">
       {imgError ? (
-        <div className="text-center space-y-2 px-6">
-          <p className="text-sm text-red-400 font-medium">图片加载失败</p>
-          <p className="text-xs text-zinc-600 leading-relaxed">
-            PlantUML 代码可能存在语法错误，或网络连接受限。
-            <br />
-            请切换至「PlantUML 代码」标签检查内容。
-          </p>
-          {imageUrl && onOpenInNewWindow && (
-            <button
-              type="button"
-              onClick={onOpenInNewWindow}
-              className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 mt-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 rounded"
-            >
-              {imageUrl.startsWith("data:")
-                ? "在新窗口打开"
-                : "直接访问 PlantUML 链接"}
-              <ArrowSquareOut size={12} />
-            </button>
-          )}
+        <div className="flex min-h-full items-center justify-center">
+          <div className="text-center space-y-2 px-6">
+            <p className="text-sm text-red-400 font-medium">图片加载失败</p>
+            <p className="text-xs text-zinc-600 leading-relaxed">
+              PlantUML 代码可能存在语法错误，或网络连接受限。
+              <br />
+              请切换至「PlantUML 代码」标签检查内容。
+            </p>
+            {imageUrl && onOpenInNewWindow && (
+              <button
+                type="button"
+                onClick={onOpenInNewWindow}
+                className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 mt-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 rounded"
+              >
+                {imageUrl.startsWith("data:")
+                  ? "在新窗口打开"
+                  : "直接访问 PlantUML 链接"}
+                <ArrowSquareOut size={12} />
+              </button>
+            )}
+          </div>
         </div>
       ) : (
-        <motion.button
-          type="button"
-          onClick={onPreview}
-          whileTap={{ scale: 0.98 }}
-          transition={{
-            type: "spring",
-            stiffness: 100,
-            damping: 20,
-          }}
-          className="group relative flex items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={imageUrl}
-            alt="UML diagram"
-            onError={onError}
-            onLoad={onLoad}
-            className="max-w-full max-h-full object-contain rounded-lg cursor-zoom-in"
-            style={{ imageRendering: "crisp-edges" }}
-            draggable={false}
-          />
-          <span className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-zinc-800/90 px-2.5 py-1.5 text-[11px] text-zinc-400 opacity-0 transition-opacity duration-200 group-hover:opacity-100 border border-zinc-700/50">
-            <MagnifyingGlassPlus size={12} weight="bold" />
-            点击放大预览
-          </span>
-        </motion.button>
+        <div className="flex min-h-full min-w-full flex-col items-center justify-center gap-0">
+          <motion.button
+            type="button"
+            onClick={onPreview}
+            whileTap={{ scale: 0.98 }}
+            transition={{
+              type: "spring",
+              stiffness: 100,
+              damping: 20,
+            }}
+            className="group relative block rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 shrink-0"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={imageUrl}
+              alt="UML diagram"
+              onError={onError}
+              onLoad={onLoad}
+              className="max-w-full w-auto h-auto object-contain rounded-lg cursor-zoom-in block"
+              style={{ imageRendering: "crisp-edges" }}
+              draggable={false}
+            />
+            <span className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-zinc-800/90 px-2.5 py-1.5 text-[11px] text-zinc-400 opacity-0 transition-opacity duration-200 group-hover:opacity-100 border border-zinc-700/50">
+              <MagnifyingGlassPlus size={12} weight="bold" />
+              点击放大预览
+            </span>
+          </motion.button>
+          {/* 底部留空，确保向下滚动能看到完整图片 */}
+          <div className="h-4 shrink-0" aria-hidden="true" />
+        </div>
       )}
     </div>
   );

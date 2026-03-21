@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useCallback, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useCallback, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Copy, Check } from "@phosphor-icons/react";
+import { X, Copy, Check, MagnifyingGlassPlus, MagnifyingGlassMinus } from "@phosphor-icons/react";
 
 interface ImagePreviewModalProps {
   isOpen: boolean;
@@ -30,6 +30,7 @@ export default function ImagePreviewModal({
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const modalRootRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
   const didDragRef = useRef(false);
   const startXRef = useRef(0);
@@ -43,18 +44,23 @@ export default function ImagePreviewModal({
     [onClose]
   );
 
+  // 滚轮缩放：往上放大、往下缩小
+  // document 监听，用选择器查找 modal（避免 ref 时机问题）
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el || !isOpen) return;
+    if (!isOpen) return;
     const handler = (e: WheelEvent) => {
-      e.preventDefault();
-      setZoom((prev) => {
-        const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-        return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, prev + delta));
-      });
+      const root = document.querySelector(".image-preview-modal-root");
+      if (root?.contains(e.target as Node)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setZoom((prev) => {
+          const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+          return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, prev + delta));
+        });
+      }
     };
-    el.addEventListener("wheel", handler, { passive: false });
-    return () => el.removeEventListener("wheel", handler);
+    document.addEventListener("wheel", handler, { passive: false, capture: true });
+    return () => document.removeEventListener("wheel", handler, true);
   }, [isOpen]);
 
   useEffect(() => {
@@ -100,10 +106,19 @@ export default function ImagePreviewModal({
     setCopied(false);
     setCopyError(null);
     document.addEventListener("keydown", handleKeyDown);
-    document.body.style.overflow = "hidden";
+    // 用 position:fixed 替代 overflow:hidden 锁滚动，避免 body overflow 导致子元素收不到 wheel
+    const scrollY = window.scrollY;
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.left = "";
+      document.body.style.right = "";
+      window.scrollTo(0, scrollY);
     };
   }, [isOpen, handleKeyDown]);
 
@@ -145,12 +160,13 @@ export default function ImagePreviewModal({
     <AnimatePresence>
       {isOpen && (
         <motion.div
+          ref={modalRootRef}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
           onClick={onClose}
-          className="fixed inset-0 z-50 flex flex-col bg-zinc-950/85 backdrop-blur-sm"
+          className="image-preview-modal-root fixed inset-0 z-50 flex flex-col bg-zinc-950/85 backdrop-blur-sm"
         >
           <div
             ref={containerRef}
@@ -165,15 +181,16 @@ export default function ImagePreviewModal({
           >
             <motion.div
               onClick={(e) => e.stopPropagation()}
-              className="flex items-center justify-center origin-center touch-none"
+              className="relative flex items-center justify-center origin-center touch-none"
               initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              transition={springTransition}
-              style={{
-                transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
-                willChange: "transform",
+              animate={{
+                opacity: 1,
+                scale: zoom,
+                x: pan.x,
+                y: pan.y,
               }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ duration: 0 }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -187,6 +204,34 @@ export default function ImagePreviewModal({
           </div>
 
           <div className="absolute top-4 right-4 flex items-center gap-2">
+            <motion.button
+              onClick={(e) => {
+                e.stopPropagation();
+                setZoom((prev) => Math.min(ZOOM_MAX, prev + ZOOM_STEP));
+              }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.98 }}
+              transition={springTransition}
+              className="w-10 h-10 rounded-xl bg-zinc-800/90 border border-zinc-700/60 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700/90 flex items-center justify-center shadow-lg"
+              aria-label="放大"
+              title="放大"
+            >
+              <MagnifyingGlassPlus size={18} weight="bold" />
+            </motion.button>
+            <motion.button
+              onClick={(e) => {
+                e.stopPropagation();
+                setZoom((prev) => Math.max(ZOOM_MIN, prev - ZOOM_STEP));
+              }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.98 }}
+              transition={springTransition}
+              className="w-10 h-10 rounded-xl bg-zinc-800/90 border border-zinc-700/60 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700/90 flex items-center justify-center shadow-lg"
+              aria-label="缩小"
+              title="缩小"
+            >
+              <MagnifyingGlassMinus size={18} weight="bold" />
+            </motion.button>
             <motion.button
               onClick={(e) => {
                 e.stopPropagation();
