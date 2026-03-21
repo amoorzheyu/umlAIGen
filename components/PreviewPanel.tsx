@@ -10,7 +10,9 @@ import {
   DownloadSimple,
   ArrowSquareOut,
   Graph,
+  MagnifyingGlassPlus,
 } from "@phosphor-icons/react";
+import ImagePreviewModal from "./ImagePreviewModal";
 
 export type PreviewTab = "image" | "code";
 
@@ -33,6 +35,7 @@ export default function PreviewPanel({
 }: PreviewPanelProps) {
   const [copied, setCopied] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // 当 imageUrl 被替换（例如从远程切到 IndexedDB dataUrl）时，清除旧错误状态
   useEffect(() => {
@@ -117,6 +120,12 @@ export default function PreviewPanel({
               </>
             ) : (
               <>
+                <ActionButton
+                  onClick={() => setPreviewOpen(true)}
+                  title="放大预览"
+                >
+                  <MagnifyingGlassPlus size={14} weight="bold" />
+                </ActionButton>
                 <ActionButton onClick={handleDownloadImage} title="下载图片">
                   <DownloadSimple size={14} />
                 </ActionButton>
@@ -157,6 +166,7 @@ export default function PreviewPanel({
                   imgError={imgError}
                   onError={() => setImgError(true)}
                   onLoad={() => setImgError(false)}
+                  onPreview={() => setPreviewOpen(true)}
                 />
               ) : (
                 <CodeView umlCode={umlCode} />
@@ -165,6 +175,14 @@ export default function PreviewPanel({
           )}
         </AnimatePresence>
       </div>
+
+      {imageUrl && (
+        <ImagePreviewModal
+          isOpen={previewOpen}
+          imageUrl={imageUrl}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
 
       {/* Filename badge */}
       {filename && !isGenerating && (
@@ -252,11 +270,13 @@ function ImageView({
   imgError,
   onError,
   onLoad,
+  onPreview,
 }: {
   imageUrl: string;
   imgError: boolean;
   onError: () => void;
   onLoad: () => void;
+  onPreview: () => void;
 }) {
   return (
     <div className="absolute inset-0 flex items-center justify-center p-4 overflow-auto">
@@ -279,15 +299,32 @@ function ImageView({
           </a>
         </div>
       ) : (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={imageUrl}
-          alt="UML diagram"
-          onError={onError}
-          onLoad={onLoad}
-          className="max-w-full max-h-full object-contain rounded-lg"
-          style={{ imageRendering: "crisp-edges" }}
-        />
+        <motion.button
+          type="button"
+          onClick={onPreview}
+          whileTap={{ scale: 0.98 }}
+          transition={{
+            type: "spring",
+            stiffness: 100,
+            damping: 20,
+          }}
+          className="group relative flex items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imageUrl}
+            alt="UML diagram"
+            onError={onError}
+            onLoad={onLoad}
+            className="max-w-full max-h-full object-contain rounded-lg cursor-zoom-in"
+            style={{ imageRendering: "crisp-edges" }}
+            draggable={false}
+          />
+          <span className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-zinc-800/90 px-2.5 py-1.5 text-[11px] text-zinc-400 opacity-0 transition-opacity duration-200 group-hover:opacity-100 border border-zinc-700/50">
+            <MagnifyingGlassPlus size={12} weight="bold" />
+            点击放大预览
+          </span>
+        </motion.button>
       )}
     </div>
   );
