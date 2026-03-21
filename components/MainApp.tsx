@@ -264,54 +264,58 @@ export default function MainApp() {
             setUmlCode(nextUmlCode);
             setFilename(nextFilename);
             setReferenceContextText(nextReferenceContextText);
-            // 先用远程图快速展示；随后转成 base64 并用本地缓存覆盖。
-            setImageUrl(nextRemoteImageUrl);
-            setActiveTab("image");
 
             if (nextFilename && nextRemoteImageUrl) {
+              let downloadedDataUrl: string | null = null;
               try {
                 const base64Res = await fetch("/api/image-base64", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ imageUrl: nextRemoteImageUrl }),
                 });
-
-                if (base64Res.ok) {
-                  const base64Payload = (await base64Res.json()) as {
-                    dataUrl: string;
-                    size: number;
-                  };
-
-                  if (base64Payload?.dataUrl) {
-                    setImageUrl(base64Payload.dataUrl);
-
-                    await putUmlAIGenEntry({
-                      filename: nextFilename,
-                      askedAt,
-                      question: askedQuestion,
-                      graphType: askedGraphType,
-                      umlCode: nextUmlCode,
-                      remoteImageUrl: nextRemoteImageUrl,
-                      imageDataUrl: base64Payload.dataUrl,
-                      size: base64Payload.size ?? 0,
-                      referenceContextText: nextReferenceContextText,
-                      referenceImages: referenceImages.map((i) => ({
-                        filename: i.filename,
-                        mimeType: i.mimeType,
-                        dataUrl: i.dataUrl,
-                        size: i.size,
-                      })),
-                      referenceFiles: referenceFiles.map((f) => ({
-                        filename: f.filename,
-                        mimeType: f.mimeType,
-                        size: f.size,
-                      })),
-                    });
-                  }
+                const base64Payload = (await base64Res.json()) as {
+                  dataUrl?: string;
+                  size?: number;
+                };
+                // 有 dataUrl 即视为成功（含后端返回 400 但携带有效 PNG base64 的情况）
+                downloadedDataUrl = base64Payload?.dataUrl ?? null;
+                if (downloadedDataUrl) {
+                  setImageUrl(downloadedDataUrl);
+                  await putUmlAIGenEntry({
+                    filename: nextFilename,
+                    askedAt,
+                    question: askedQuestion,
+                    graphType: askedGraphType,
+                    umlCode: nextUmlCode,
+                    remoteImageUrl: nextRemoteImageUrl,
+                    imageDataUrl: downloadedDataUrl,
+                    size: base64Payload.size ?? 0,
+                    referenceContextText: nextReferenceContextText,
+                    referenceImages: referenceImages.map((i) => ({
+                      filename: i.filename,
+                      mimeType: i.mimeType,
+                      dataUrl: i.dataUrl,
+                      size: i.size,
+                    })),
+                    referenceFiles: referenceFiles.map((f) => ({
+                      filename: f.filename,
+                      mimeType: f.mimeType,
+                      size: f.size,
+                    })),
+                  });
                 }
               } catch {
-                // 缓存失败不影响主流程（仍然保留远程预览）
+                // 下载失败时再退回到远程链接展示
               }
+              if (!downloadedDataUrl) {
+                setImageUrl(nextRemoteImageUrl);
+                setError("图片未能保存到本地，当前为远程链接展示");
+              }
+              // 图片就绪后再切换到预览 tab，避免空 imageUrl 导致裂图
+              setActiveTab("image");
+            } else {
+              // 无图片时保持在代码 tab
+              setActiveTab("code");
             }
 
             if (showHistory) {
@@ -374,13 +378,11 @@ export default function MainApp() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ imageUrl: item.imageUrl }),
           });
-
-          if (!base64Res.ok) return;
           const base64Payload = (await base64Res.json()) as {
             dataUrl?: string;
             size?: number;
           };
-
+          // 有 dataUrl 即使用（含后端返回 400 但携带有效 PNG base64 的情况）
           if (!base64Payload?.dataUrl) return;
 
           // TS: `base64Payload.dataUrl` 在 json 解析后是可选类型，这里明确收窄为 string
@@ -504,6 +506,10 @@ export default function MainApp() {
             isGenerating={isGenerating}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            onUMLFixed={({ umlCode: fixedCode, imageUrl: fixedImageUrl }) => {
+              setUmlCode(fixedCode);
+              setImageUrl(fixedImageUrl);
+            }}
           />
         </div>
       </main>

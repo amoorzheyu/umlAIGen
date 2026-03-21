@@ -366,3 +366,62 @@ export async function extractContextFromFileText(params: {
     max_tokens: 1024,
   });
 }
+
+const FIX_UML_SYSTEM_PROMPT = `你是 PlantUML 语法修复助手。
+
+任务：用户会提供 (1) 出错的 PlantUML 源码；(2) 一张图片，该图片是 PlantUML 渲染失败时显示的错误信息（通常为语法错误提示）。
+
+你必须：
+1. 根据图片中的报错内容，定位并修复语法错误；
+2. 仅做最小修改，尽可能不改变原有逻辑与结构；
+3. 严格遵循 PlantUML 1.2026 语法，使用半角标点（分号用 ; 不是 ；）。
+
+输出规则（必须遵守）：
+1. 只输出修复后的纯 PlantUML 代码，禁止解释、标题、Markdown、代码块标记；
+2. 代码必须严格以单独一行的 @startuml 开始，以单独一行的 @enduml 结束；
+3. 不得输出 @startuml 之前或 @enduml 之后的任何内容。`;
+
+export async function fixUMLFromErrorImage(params: {
+  umlCode: string;
+  imageDataUrl: string;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const { umlCode, imageDataUrl, signal } = params;
+
+  const userContent = [
+    {
+      type: "text",
+      text: `以下 PlantUML 源码渲染失败，请根据附带的错误截图修复语法错误。仅修复错误，尽量不改变原逻辑。\n\n当前源码：\n\`\`\`\n${umlCode}\n\`\`\``,
+    },
+    { type: "image_url", image_url: { url: imageDataUrl } },
+  ];
+
+  const url = getChatUrl();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: MODEL_NAME,
+      messages: [
+        { role: "system", content: FIX_UML_SYSTEM_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      temperature: 0.2,
+      max_tokens: 2048,
+      chat_template_kwargs: { enable_thinking: false },
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Qwen API ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  const content: string = data.choices?.[0]?.message?.content ?? "";
+  return normalizePlantUMLFromModelOutput(content);
+}

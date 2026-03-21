@@ -11,8 +11,10 @@ import {
   ArrowSquareOut,
   Graph,
   MagnifyingGlassPlus,
+  Wrench,
 } from "@phosphor-icons/react";
 import ImagePreviewModal from "./ImagePreviewModal";
+import { getUmlAIGenEntry } from "@/lib/umlAIGenIdb";
 
 export type PreviewTab = "image" | "code";
 
@@ -23,6 +25,7 @@ interface PreviewPanelProps {
   isGenerating: boolean;
   activeTab: PreviewTab;
   onTabChange: (tab: PreviewTab) => void;
+  onUMLFixed?: (result: { umlCode: string; imageUrl: string }) => void;
 }
 
 export default function PreviewPanel({
@@ -32,11 +35,15 @@ export default function PreviewPanel({
   isGenerating,
   activeTab,
   onTabChange,
+  onUMLFixed,
 }: PreviewPanelProps) {
   const [codeCopied, setCodeCopied] = useState(false);
   const [imageCopied, setImageCopied] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [isFixing, setIsFixing] = useState(false);
+  const [fixError, setFixError] = useState<string | null>(null);
+  const [showFixConfirm, setShowFixConfirm] = useState(false);
 
   // 当 imageUrl 被替换（例如从远程切到 IndexedDB dataUrl）时，清除旧错误状态
   useEffect(() => {
@@ -86,6 +93,77 @@ export default function PreviewPanel({
       }
     } else {
       window.open(imageUrl, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const handleFixUMLRequest = () => {
+    if (!umlCode || !imageUrl || !onUMLFixed || isFixing || isGenerating)
+      return;
+    setShowFixConfirm(true);
+  };
+
+  const performFixUML = async () => {
+    if (!umlCode || !imageUrl || !onUMLFixed) return;
+    setShowFixConfirm(false);
+    setIsFixing(true);
+    setFixError(null);
+
+    try {
+      let dataUrl = imageUrl;
+      if (!imageUrl.startsWith("data:")) {
+        // 优先使用 IndexedDB 本地缓存，避免重复拉取
+        if (filename) {
+          const cached = await getUmlAIGenEntry(filename);
+          if (cached?.imageDataUrl) {
+            dataUrl = cached.imageDataUrl;
+          }
+        }
+        if (!dataUrl.startsWith("data:")) {
+          const base64Res = await fetch("/api/image-base64", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageUrl }),
+          });
+          const payload = (await base64Res.json()) as {
+            dataUrl?: string;
+            error?: string;
+          };
+          if (payload?.dataUrl) {
+            dataUrl = payload.dataUrl;
+          } else if (!base64Res.ok) {
+            throw new Error(payload?.error ?? "图片转换失败");
+          } else {
+            throw new Error("图片数据无效");
+          }
+        }
+      }
+
+      const fixRes = await fetch("/api/fix-uml", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ umlCode, imageDataUrl: dataUrl }),
+      });
+
+      if (!fixRes.ok) {
+        const err = (await fixRes.json()) as { error?: string };
+        throw new Error(err?.error ?? "修复失败，请重试");
+      }
+
+      const result = (await fixRes.json()) as {
+        umlCode?: string;
+        imageUrl?: string;
+      };
+      if (result?.umlCode && result?.imageUrl) {
+        onUMLFixed({ umlCode: result.umlCode, imageUrl: result.imageUrl });
+      } else {
+        throw new Error("修复结果无效");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "修复失败";
+      setFixError(msg);
+      setTimeout(() => setFixError(null), 4000);
+    } finally {
+      setIsFixing(false);
     }
   };
 
@@ -170,6 +248,19 @@ export default function PreviewPanel({
               </>
             ) : (
               <>
+                {onUMLFixed && (
+                  <ActionButton
+                    onClick={handleFixUMLRequest}
+                    title="AI 修复语法"
+                    disabled={isFixing}
+                  >
+                    {isFixing ? (
+                      <span className="inline-block size-3.5 animate-spin rounded-full border-2 border-zinc-500 border-t-zinc-200" />
+                    ) : (
+                      <Wrench size={14} weight="bold" />
+                    )}
+                  </ActionButton>
+                )}
                 <ActionButton
                   onClick={() => setPreviewOpen(true)}
                   title="放大预览"
@@ -239,9 +330,61 @@ export default function PreviewPanel({
         />
       )}
 
-      {/* 复制成功提示 */}
+      {/* 修复确认弹窗 */}
       <AnimatePresence>
-        {(codeCopied || imageCopied) && (
+        {showFixConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowFixConfirm(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm rounded-xl border border-zinc-700 bg-zinc-900 p-6 shadow-xl shadow-black/50"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
+                  <Wrench size={20} className="text-emerald-400" weight="bold" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-sm font-semibold text-zinc-200">
+                    AI 修复语法
+                  </h4>
+                  <p className="mt-2 text-xs text-zinc-500 leading-relaxed">
+                    将当前 PlantUML 代码和报错截图发送给模型，仅修复语法错误，尽量不改变原逻辑。确定继续？
+                  </p>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowFixConfirm(false)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors active:scale-[0.98]"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void performFixUML()}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-500 transition-colors active:scale-[0.98]"
+                >
+                  确定
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 复制成功 / 修复失败提示 */}
+      <AnimatePresence>
+        {(codeCopied || imageCopied) && !fixError && (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -251,6 +394,17 @@ export default function PreviewPanel({
           >
             <Check size={16} weight="bold" className="text-emerald-400 flex-shrink-0" />
             <span>已复制到剪贴板</span>
+          </motion.div>
+        )}
+        {fixError && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 rounded-xl bg-zinc-800/95 border border-red-500/50 px-4 py-2.5 text-sm text-red-300"
+          >
+            <span>{fixError}</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -276,18 +430,24 @@ function ActionButton({
   title,
   children,
   active,
+  disabled,
 }: {
   onClick: () => void;
   title: string;
   children: React.ReactNode;
   active?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       title={title}
-      className={`flex items-center justify-center w-8 h-8 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-all duration-150 active:scale-95 ${
-        active ? "text-green-400" : ""
+      disabled={disabled}
+      className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150 active:scale-95 ${
+        disabled
+          ? "text-zinc-600 cursor-not-allowed"
+          : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800" + (active ? " text-green-400" : "")
       }`}
     >
       {children}
@@ -351,9 +511,18 @@ function ImageView({
   onPreview: () => void;
   onOpenInNewWindow?: () => void;
 }) {
+  const isLoading = !imageUrl;
+
   return (
     <div className="absolute inset-0 overflow-auto overscroll-contain p-4 min-h-0">
-      {imgError ? (
+      {isLoading ? (
+        <div className="flex min-h-full items-center justify-center">
+          <div className="text-center space-y-3">
+            <span className="inline-block size-6 animate-spin rounded-full border-2 border-zinc-500 border-t-zinc-200" />
+            <p className="text-xs text-zinc-500">正在加载图片…</p>
+          </div>
+        </div>
+      ) : imgError ? (
         <div className="flex min-h-full items-center justify-center">
           <div className="text-center space-y-2 px-6">
             <p className="text-sm text-red-400 font-medium">图片加载失败</p>
