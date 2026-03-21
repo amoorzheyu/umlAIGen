@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Image as ImageIcon,
@@ -349,8 +349,20 @@ function ImageView({
 }
 
 function CodeView({ umlCode }: { umlCode: string }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 代码流式生成时自动滚动到底部，始终显示最新输出
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !umlCode) return;
+    el.scrollTop = el.scrollHeight - el.clientHeight;
+  }, [umlCode]);
+
   return (
-    <div className="absolute inset-0 overflow-auto">
+    <div
+      ref={scrollRef}
+      className="absolute inset-0 overflow-auto overscroll-contain scrollbar-hide"
+    >
       <pre className="p-5 text-xs text-zinc-300 font-mono leading-relaxed whitespace-pre-wrap break-words">
         {umlCode}
       </pre>
