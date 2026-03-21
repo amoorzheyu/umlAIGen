@@ -96,18 +96,28 @@ export default function InputPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const referenceScrollRef = useRef<HTMLDivElement>(null);
+  const referenceScrollWrapperRef = useRef<HTMLDivElement>(null);
   const [referenceError, setReferenceError] = useState<string | null>(null);
 
   useEffect(() => {
-    const el = referenceScrollRef.current;
-    if (!el) return;
+    const wrapper = referenceScrollWrapperRef.current;
+    const scrollEl = referenceScrollRef.current;
+    if (!wrapper || !scrollEl) return;
     const handler = (e: WheelEvent) => {
-      if (el.scrollWidth <= el.clientWidth) return;
+      const delta = Math.abs(e.deltaX) > 0 ? e.deltaX : e.deltaY;
+      if (Math.abs(delta) < 1) return;
+      const maxScroll = scrollEl.scrollWidth - scrollEl.clientWidth;
+      if (maxScroll <= 0) return;
       e.preventDefault();
-      el.scrollLeft += e.deltaY;
+      e.stopPropagation();
+      scrollEl.scrollLeft += delta;
     };
-    el.addEventListener("wheel", handler, { passive: false });
-    return () => el.removeEventListener("wheel", handler);
+    wrapper.addEventListener("wheel", handler, {
+      passive: false,
+      capture: true,
+    });
+    return () =>
+      wrapper.removeEventListener("wheel", handler, { capture: true });
   }, []);
 
   useEffect(() => {
@@ -483,7 +493,10 @@ export default function InputPanel({
         ) : null}
 
         {/* Mixed uploader */}
-        <div className="flex flex-col gap-2">
+        <div
+          ref={referenceScrollWrapperRef}
+          className="flex flex-col gap-2"
+        >
           <p className="text-[11px] text-zinc-600 font-medium">
             图片/文件参考（后端按后缀自动识别）
           </p>
@@ -497,7 +510,7 @@ export default function InputPanel({
 
           <div
             ref={referenceScrollRef}
-            className="flex gap-2 overflow-x-auto pb-1"
+            className="flex gap-2 overflow-x-scroll overflow-y-hidden pb-1"
           >
             <button
               type="button"
