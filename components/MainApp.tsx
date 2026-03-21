@@ -5,7 +5,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ClockCounterClockwise,
   GithubLogo,
-  Pulse,
 } from "@phosphor-icons/react";
 import InputPanel, {
   type UmlHint,
@@ -390,8 +389,9 @@ export default function MainApp() {
       {/* ── Header ──────────────────────────────────────────── */}
       <header className="flex-shrink-0 flex items-center justify-between px-4 lg:px-6 h-14 border-b border-zinc-800/80 bg-[#09090b]/90 backdrop-blur-md z-10 shadow-[0_10px_30px_-20px_rgba(0,0,0,0.7)]">
         <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
-            <Pulse size={15} className="text-blue-400" weight="fill" />
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/favicon.svg" alt="" className="w-full h-full object-contain" />
           </div>
           <span className="text-sm sm:text-base font-semibold tracking-tight">
             UML <span className="text-blue-400">AI</span> Generator
