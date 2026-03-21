@@ -483,6 +483,16 @@ export default function InputPanel({
           />
 
           <div className="flex gap-2 overflow-x-auto pb-1">
+            <button
+              type="button"
+              onClick={() => uploadInputRef.current?.click()}
+              className="flex-shrink-0 w-28 h-28 rounded-xl border border-zinc-700/50 bg-zinc-900/30 hover:border-zinc-600 hover:bg-zinc-900/45 transition-all duration-150 active:scale-[0.98] focus:outline-none focus:ring-1 focus:ring-blue-500/50 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="上传图片或文件"
+              title="上传图片或文件"
+              disabled={isGenerating}
+            >
+              <Plus size={22} className="text-zinc-400" />
+            </button>
             {referenceImages.map((img) => (
               <div
                 key={`image_${img.id}`}
@@ -549,17 +559,6 @@ export default function InputPanel({
                 </div>
               </div>
             ))}
-
-            <button
-              type="button"
-              onClick={() => uploadInputRef.current?.click()}
-              className="flex-shrink-0 w-28 h-28 rounded-xl border border-zinc-700/50 bg-zinc-900/30 hover:border-zinc-600 hover:bg-zinc-900/45 transition-all duration-150 active:scale-[0.98] focus:outline-none focus:ring-1 focus:ring-blue-500/50 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="上传图片或文件"
-              title="上传图片或文件"
-              disabled={isGenerating}
-            >
-              <Plus size={22} className="text-zinc-400" />
-            </button>
           </div>
         </div>
 
