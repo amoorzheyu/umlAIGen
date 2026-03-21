@@ -13,9 +13,9 @@
     "framer-motion": "latest",
     "mammoth": "^1.12.0",
     "next": "latest",
-    "pdf-parse": "^2.4.5",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "unpdf": "^1.4.0"
   },
   "devDependencies": {
     "@types/node": "^20",

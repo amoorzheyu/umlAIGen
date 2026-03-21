@@ -7,8 +7,8 @@ import {
   generateUMLCodeStream,
 } from "@/lib/qwen";
 import { getPlantUMLPngUrl } from "@/lib/plantuml";
-import * as pdfParseModule from "pdf-parse";
 import mammoth from "mammoth";
+import { extractText } from "unpdf";
 
 function shouldStoreOutput(): boolean {
   const v = process.env.UMLAIGEN_STORE_OUTPUT;
@@ -190,10 +190,10 @@ export async function POST(req: NextRequest) {
             }
 
             if (mimeType === "application/pdf" || lowerName.endsWith(".pdf")) {
-              const pdfParseFn =
-                (pdfParseModule as any).default ?? pdfParseModule;
-              const parsed = await pdfParseFn(Buffer.from(arrayBuffer));
-              return parsed.text?.trim() ?? "";
+              const { text } = await extractText(new Uint8Array(arrayBuffer), {
+                mergePages: true,
+              });
+              return typeof text === "string" ? text.trim() : "";
             }
 
             if (
