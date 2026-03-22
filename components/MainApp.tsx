@@ -1,6 +1,10 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+
+// 环境变量控制：是否在检测到语法错误时自动调用 AI 修复（默认 true，设 NEXT_PUBLIC_AUTO_FIX_UML=false 关闭）
+const AUTO_FIX_ENABLED =
+  process.env.NEXT_PUBLIC_AUTO_FIX_UML !== "false";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ClockCounterClockwise,
@@ -282,6 +286,33 @@ export default function MainApp() {
                 downloadedDataUrl = base64Payload?.dataUrl ?? null;
 
                 if (base64Res.status === 400 && downloadedDataUrl) {
+                  if (!AUTO_FIX_ENABLED) {
+                    setImageUrl(downloadedDataUrl);
+                    await putUmlAIGenEntry({
+                      filename: nextFilename,
+                      askedAt,
+                      question: askedQuestion,
+                      graphType: askedGraphType,
+                      umlCode: nextUmlCode,
+                      remoteImageUrl: nextRemoteImageUrl,
+                      imageDataUrl: downloadedDataUrl,
+                      size: base64Payload.size ?? 0,
+                      referenceContextText: nextReferenceContextText,
+                      referenceImages: referenceImages.map((i) => ({
+                        filename: i.filename,
+                        mimeType: i.mimeType,
+                        dataUrl: i.dataUrl,
+                        size: i.size,
+                      })),
+                      referenceFiles: referenceFiles.map((f) => ({
+                        filename: f.filename,
+                        mimeType: f.mimeType,
+                        size: f.size,
+                      })),
+                    });
+                    setActiveTab("image");
+                    // 不进入下方 auto-fix 流程
+                  } else {
                   // 400 表示 PlantUML 语法错误，自动调用修复；修复后若仍 400 则继续重复修复
                   setSyntaxFixInProgress(1);
                   setUmlCode("");
@@ -417,6 +448,7 @@ export default function MainApp() {
                     );
                   } finally {
                     setSyntaxFixInProgress(0);
+                  }
                   }
                 } else if (downloadedDataUrl) {
                   setImageUrl(downloadedDataUrl);

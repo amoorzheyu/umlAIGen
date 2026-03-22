@@ -52,6 +52,7 @@ pnpm dev
 | PLANTUML_PNG_BASE_URL | PlantUML PNG 服务地址 | `https://localhost:8001/plantuml/png` |
 | PLANTUML_SVG_BASE_URL | PlantUML SVG 服务地址 | `https://localhost:8001/plantuml/svg` |
 | UMLAIGEN_STORE_OUTPUT | 是否将 .wsd 文件写入 output/ | `false` 或 `true` |
+| NEXT_PUBLIC_AUTO_FIX_UML | 检测到语法错误时是否自动调用 AI 修复 | `true`（默认）或 `false` |
 
 ## 项目结构
 
